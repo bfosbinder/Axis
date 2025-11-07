@@ -5,30 +5,48 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Axis — Blueprint Inspection</title>
   <meta name="description" content="Axis is a blueprint-aware inspection app with pick-on-print, OCR, default tolerances, CSV sidecars, and dual-screen viewing." />
+
+  <!-- Social / Open Graph -->
+  <meta property="og:title" content="Axis — Blueprint Inspection" />
+  <meta property="og:description" content="Create and execute inspection plans directly on your prints. Pick features, auto-fill tolerances, OCR callouts, and export results—without leaving the blueprint." />
+  <meta property="og:image" content="https://bfosbinder.github.io/Axis/axis-preview.png" />
+  <meta property="og:url" content="https://bfosbinder.github.io/Axis/" />
+  <meta name="twitter:card" content="summary_large_image" />
+
+  <!-- Favicon -->
+  <link rel="icon" href="favicon.ico" type="image/x-icon" />
+  <link rel="apple-touch-icon" href="axis-logo.png" />
+
+  <!-- Fonts & Tailwind -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     :root { --axis-accent:#2563EB }
+    body { font-family:Inter,system-ui,Arial }
     .container { max-width: 1150px }
     .glass { background:rgba(255,255,255,.06); backdrop-filter: blur(8px) }
     .badge { background: rgba(37,99,235,.1); color: var(--axis-accent) }
   </style>
 </head>
-<body class="bg-white text-slate-900 antialiased" style="font-family:Inter,system-ui,Arial">
+<body class="bg-white text-slate-900 antialiased">
+
   <!-- HERO -->
   <header class="relative">
     <div class="absolute inset-0 bg-[#0B1020] -z-10"></div>
     <div class="container mx-auto px-6 py-20 md:py-28 text-white">
       <div class="max-w-3xl">
         <div class="inline-flex items-center gap-2 badge px-3 py-1 rounded-full text-sm">Blueprint-aware QC</div>
-        <h1 class="text-4xl md:text-6xl font-extrabold mt-4">Axis</h1>
+        <h1 class="text-5xl md:text-6xl font-extrabold mt-4 flex items-center gap-3">
+          <img src="axis-logo.png" alt="Axis Logo" class="w-10 h-10 rounded-md shadow" />
+          Axis
+        </h1>
         <p class="mt-4 text-lg md:text-xl text-slate-200">
-          Create and execute inspection plans directly on your prints. Pick features, auto-fill tolerances, OCR callouts, and export results—without leaving the blueprint.
+          Create and execute inspection plans directly on your prints. Pick features, auto-balloon, OCR callouts, and export results—without leaving the blueprint.
         </p>
         <div class="mt-8 flex flex-wrap gap-3">
           <a href="#download" class="px-6 py-3 rounded-xl bg-[var(--axis-accent)] text-white font-semibold hover:opacity-90">Download</a>
-          <a href="https://github.com/yourname/axis" class="px-6 py-3 rounded-xl border border-white/20 glass hover:bg-white/10">View on GitHub</a>
+          <a href="https://github.com/bfosbinder/Axis" class="px-6 py-3 rounded-xl border border-white/20 glass hover:bg-white/10">View on GitHub</a>
         </div>
         <div class="mt-4 text-sm text-slate-300">Portable CSV sidecars • Works with PDFs/JPGs • Optional OCR</div>
       </div>
@@ -45,7 +63,7 @@
       </div>
       <div class="p-5 border rounded-2xl hover:shadow-sm">
         <h3 class="font-semibold">Smart Tolerances</h3>
-        <p class="text-sm text-slate-600 mt-1">Auto-parse “±” and “+a −b”. Bare numbers use editable default block tolerances by decimals.</p>
+        <p class="text-sm text-slate-600 mt-1">Auto-parse ± and +a−b. Bare numbers use editable default block tolerances by decimals.</p>
       </div>
       <div class="p-5 border rounded-2xl hover:shadow-sm">
         <h3 class="font-semibold">OCR Assist</h3>
@@ -60,19 +78,9 @@
         <p class="text-sm text-slate-600 mt-1">No database required. Files live with the blueprint and export cleanly.</p>
       </div>
       <div class="p-5 border rounded-2xl hover:shadow-sm">
-        <h3 class="font-semibold">SPC (Soon)</h3>
+        <h3 class="font-semibold">SPC (Coming Soon)</h3>
         <p class="text-sm text-slate-600 mt-1">Historical series and XmR capability from your results CSVs.</p>
       </div>
-    </div>
-  </section>
-
-  <!-- HOW IT WORKS -->
-  <section class="container mx-auto px-6 py-16">
-    <h2 class="text-3xl md:text-4xl font-extrabold">How it works</h2>
-    <div class="grid md:grid-cols-3 gap-6 mt-8">
-      <div class="p-5 rounded-xl border"><span class="font-semibold">1. Load a print.</span><p class="text-sm text-slate-600 mt-1">Open PDF/JPG. Axis creates a sidecar CSV to store features.</p></div>
-      <div class="p-5 rounded-xl border"><span class="font-semibold">2. Balloon and define.</span><p class="text-sm text-slate-600 mt-1">Pick features, set methods, enter tolerances or let block defaults populate.</p></div>
-      <div class="p-5 rounded-xl border"><span class="font-semibold">3. Inspect & export.</span><p class="text-sm text-slate-600 mt-1">Enter results by work order. Export filtered CSV when done.</p></div>
     </div>
   </section>
 
@@ -84,13 +92,13 @@
           <h2 class="text-2xl md:text-3xl font-extrabold">Get Axis for Windows</h2>
           <p class="text-slate-700 mt-2">Built with PyInstaller. Portable, no Python required.</p>
           <ul class="list-disc pl-5 text-slate-700 mt-3 space-y-1 text-sm">
-            <li>Download from GitHub Releases</li>
+            <li><a class="underline text-[var(--axis-accent)]" href="https://github.com/bfosbinder/Axis/releases">Download from GitHub Releases</a></li>
             <li>ONEDIR build; OneFile optional</li>
             <li>Optional: bundle Tesseract & tessdata</li>
           </ul>
           <div class="mt-4 flex gap-3">
-            <a class="px-5 py-3 rounded-xl bg-[var(--axis-accent)] text-white font-semibold" href="https://github.com/yourname/axis/releases">Download</a>
-            <a class="px-5 py-3 rounded-xl border" href="https://github.com/yourname/axis">GitHub</a>
+            <a class="px-5 py-3 rounded-xl bg-[var(--axis-accent)] text-white font-semibold" href="https://github.com/bfosbinder/Axis/releases">Download</a>
+            <a class="px-5 py-3 rounded-xl border" href="https://github.com/bfosbinder/Axis">GitHub</a>
           </div>
         </div>
         <div class="rounded-2xl bg-slate-50 border p-5">
@@ -108,16 +116,18 @@
     </div>
   </section>
 
+  <!-- FOOTER -->
   <footer class="py-10 border-t">
     <div class="container mx-auto px-6 flex flex-col md:flex-row items-center justify-between gap-4 text-sm text-slate-600">
-      <div>© <span id="y"></span> Axis.</div>
+      <div>© <span id="y"></span> Axis. Built by <a href="https://github.com/bfosbinder" class="underline">bfosbinder</a></div>
       <div class="flex gap-4">
         <a href="#features" class="hover:underline">Features</a>
         <a href="#download" class="hover:underline">Download</a>
-        <a href="https://github.com/yourname/axis" class="hover:underline">GitHub</a>
+        <a href="https://github.com/bfosbinder/Axis" class="hover:underline">GitHub</a>
       </div>
     </div>
   </footer>
+
   <script>document.getElementById('y').textContent=new Date().getFullYear()</script>
 </body>
 </html>
