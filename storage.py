@@ -166,7 +166,7 @@ def parse_tolerance_expression(s: str) -> Tuple[float, float, float]:
         return nom, nom - tol, nom + tol
 
     # alternative: explicit +/- with spaces: nominal +a -b  (order may vary)
-    m = re.fullmatch(r"([+-]?\d*\.?\d+)\s*([+-]\s*\d*\.?\d+)\s*([+-]\s*\d*\.?\d+)", s2)
+    m = re.fullmatch(r"([+-]?\d*\.?\d+)\s*([+-]\s*\d*\.?\d+)(?:\s*/\s*)?\s*([+-]\s*\d*\.?\d+)", s2)
     if m:
         nom = float(m.group(1))
         a = float(m.group(2).replace(" ", ""))

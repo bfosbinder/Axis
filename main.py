@@ -1,13 +1,16 @@
 import sys
 import os
-import csv
+import re
+from functools import partial
 from pathlib import Path
+from datetime import datetime
 import fitz  # PyMuPDF
 from PyQt6 import QtWidgets, QtGui, QtCore
 from storage import ensure_master, read_master, add_feature, update_feature, delete_feature, read_wo, write_wo, write_master, parse_tolerance_expression, normalize_str, MASTER_HEADER, list_workorders
 
 
 BALLOON_RADIUS = 14
+PAGE_RENDER_ZOOM = 1.5
 
 
 def format_number(value: float, decimals: int = 6) -> str:
@@ -77,6 +80,82 @@ class StartSessionDialog(QtWidgets.QDialog):
             return
         value = self._previous_orders[index - 1]
         self.edit.setText(value)
+
+
+class MethodListDialog(QtWidgets.QDialog):
+    """Dialog to manage available inspection methods."""
+
+    def __init__(self, parent=None, methods=None):
+        super().__init__(parent)
+        self.setWindowTitle('Inspection Methods')
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.addWidget(QtWidgets.QLabel('Double-click a method to rename it.'))
+
+        self.list_widget = QtWidgets.QListWidget()
+        self.list_widget.setEditTriggers(
+            QtWidgets.QAbstractItemView.EditTrigger.DoubleClicked
+            | QtWidgets.QAbstractItemView.EditTrigger.EditKeyPressed
+        )
+        for method in methods or []:
+            if method:
+                self.list_widget.addItem(method)
+        layout.addWidget(self.list_widget)
+
+        entry_layout = QtWidgets.QHBoxLayout()
+        self.input = QtWidgets.QLineEdit()
+        self.input.setPlaceholderText('Add new method')
+        entry_layout.addWidget(self.input)
+        add_btn = QtWidgets.QPushButton('Add')
+        add_btn.clicked.connect(self._add_from_input)
+        entry_layout.addWidget(add_btn)
+        layout.addLayout(entry_layout)
+
+        remove_btn = QtWidgets.QPushButton('Remove Selected')
+        remove_btn.clicked.connect(self._remove_selected)
+        layout.addWidget(remove_btn)
+
+        buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.StandardButton.Ok | QtWidgets.QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+        self.input.returnPressed.connect(self._add_from_input)
+
+    def _add_from_input(self):
+        text = self.input.text().strip()
+        if not text:
+            return
+        if not self._contains(text):
+            self.list_widget.addItem(text)
+        self.input.clear()
+        self.input.setFocus()
+
+    def _remove_selected(self):
+        for item in self.list_widget.selectedItems():
+            row = self.list_widget.row(item)
+            self.list_widget.takeItem(row)
+
+    def _contains(self, text: str) -> bool:
+        for idx in range(self.list_widget.count()):
+            if self.list_widget.item(idx).text().strip().lower() == text.lower():
+                return True
+        return False
+
+    def get_methods(self):
+        values = []
+        seen = set()
+        for idx in range(self.list_widget.count()):
+            text = self.list_widget.item(idx).text().strip()
+            if not text:
+                continue
+            key = text.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            values.append(text)
+        return values
 
 
 class BalloonItem(QtWidgets.QGraphicsEllipseItem):
@@ -194,6 +273,9 @@ class PDFView(QtWidgets.QGraphicsView):
         self._current_scale = 1.0
         self._min_scale = 0.2
         self._max_scale = 40.0
+        self._panning = False
+        self._pan_button = None
+        self._last_pan_pos = None
         self.setRenderHints(
             QtGui.QPainter.RenderHint.Antialiasing | QtGui.QPainter.RenderHint.SmoothPixmapTransform
         )
@@ -249,20 +331,47 @@ class PDFView(QtWidgets.QGraphicsView):
             self.ensureVisible(QtCore.QRectF(focus_point.x() - 20, focus_point.y() - 20, 40, 40), 10, 10)
 
     def mousePressEvent(self, event):
-        if event.button() == QtCore.Qt.MouseButton.LeftButton and self.controller.mode == 'Ballooning' and self.controller.pick_on_print:
-            self._rubber_origin = event.pos()
-            self._rubber.setGeometry(QtCore.QRect(self._rubber_origin, QtCore.QSize()))
-            self._rubber.show()
-        else:
-            super().mousePressEvent(event)
+        if self.controller.mode == 'Ballooning' and self.controller.pick_on_print:
+            if event.button() == QtCore.Qt.MouseButton.LeftButton:
+                self._rubber_origin = event.pos()
+                self._rubber.setGeometry(QtCore.QRect(self._rubber_origin, QtCore.QSize()))
+                self._rubber.show()
+                return
+            if event.button() in (QtCore.Qt.MouseButton.MiddleButton, QtCore.Qt.MouseButton.RightButton):
+                # allow panning with alternate buttons while pick mode is active
+                self._panning = True
+                self._pan_button = event.button()
+                self._last_pan_pos = event.pos()
+                self.setCursor(QtCore.Qt.CursorShape.ClosedHandCursor)
+                event.accept()
+                return
+        super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
+        if self._panning:
+            if self._last_pan_pos is not None:
+                delta = event.pos() - self._last_pan_pos
+                self._last_pan_pos = event.pos()
+                hbar = self.horizontalScrollBar()
+                vbar = self.verticalScrollBar()
+                hbar.setValue(hbar.value() - delta.x())
+                vbar.setValue(vbar.value() - delta.y())
+            event.accept()
+            return
         if self._rubber.isVisible():
             self._rubber.setGeometry(QtCore.QRect(self._rubber_origin, event.pos()).normalized())
         else:
             super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
+        if self._panning and event.button() == self._pan_button:
+            self._panning = False
+            self._pan_button = None
+            self._last_pan_pos = None
+            if hasattr(self.controller, '_update_pdf_cursor'):
+                self.controller._update_pdf_cursor()
+            event.accept()
+            return
         if self._rubber.isVisible():
             geo = self._rubber.geometry()
             self._rubber.hide()
@@ -300,8 +409,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.page_label = None
         self.page_spin = None
         self.total_pages = 0
+        self.method_options = ['CMM', 'Pin Gage', 'Visual']
 
         self._build_ui()
+        self._refresh_method_combobox_options()
+        self._update_pdf_cursor()
 
     def _build_ui(self):
         toolbar = QtWidgets.QToolBar()
@@ -352,9 +464,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.page_spin.valueChanged.connect(self._page_spin_changed)
         toolbar.addWidget(self.page_spin)
 
-        export_btn = QtWidgets.QPushButton('Export Filtered CSV')
-        export_btn.clicked.connect(self.export_filtered)
+        export_btn = QtWidgets.QPushButton('Export PDFs')
+        export_btn.clicked.connect(self.export_pdfs)
         toolbar.addWidget(export_btn)
+
+        edit_methods_btn = QtWidgets.QPushButton('Edit Methods')
+        edit_methods_btn.clicked.connect(self._edit_methods)
+        toolbar.addWidget(edit_methods_btn)
 
         # Change session without reopening PDF
         change_session = QtGui.QAction('Change Session', self)
@@ -372,8 +488,12 @@ class MainWindow(QtWidgets.QMainWindow):
         lv = QtWidgets.QVBoxLayout(left)
         filter_layout = QtWidgets.QHBoxLayout()
         filter_layout.addWidget(QtWidgets.QLabel('Method:'))
-        self.method_filter = QtWidgets.QLineEdit()
-        self.method_filter.textChanged.connect(self.refresh_table)
+        self.method_filter = QtWidgets.QComboBox()
+        self.method_filter.setEditable(False)
+        self.method_filter.setInsertPolicy(QtWidgets.QComboBox.InsertPolicy.NoInsert)
+        self.method_filter.setSizeAdjustPolicy(QtWidgets.QComboBox.SizeAdjustPolicy.AdjustToContents)
+        self.method_filter.addItem('All')
+        self.method_filter.currentTextChanged.connect(self.refresh_table)
         filter_layout.addWidget(self.method_filter)
         filter_layout.addWidget(QtWidgets.QLabel('Status:'))
         self.status_filter = QtWidgets.QComboBox()
@@ -449,9 +569,11 @@ class MainWindow(QtWidgets.QMainWindow):
                 continue
 
             # method filter
-            sel_method = self.method_filter.text().strip()
-            if sel_method and sel_method.lower() not in method.lower():
-                continue
+            sel_method = self.method_filter.currentText() if isinstance(self.method_filter, QtWidgets.QComboBox) else 'All'
+            if sel_method not in ('All', ''):
+                method_value = (method or '').strip()
+                if method_value.lower() != sel_method.lower():
+                    continue
 
             row = table.rowCount()
             table.insertRow(row)
@@ -467,21 +589,15 @@ class MainWindow(QtWidgets.QMainWindow):
             can_edit_specs = (self.mode == 'Ballooning')
             method_item = make_item(method, False)
             self.table.setItem(row, 2, method_item)
-            if self.mode == 'Ballooning':
-                combo = QtWidgets.QComboBox()
-                combo.setEditable(True)
-                combo.setInsertPolicy(QtWidgets.QComboBox.InsertPolicy.NoInsert)
-                combo.setSizeAdjustPolicy(QtWidgets.QComboBox.SizeAdjustPolicy.AdjustToContents)
-                combo.setEnabled(True)
-                combo.setPlaceholderText('Method')
-                line_edit = combo.lineEdit()
-                if line_edit is not None:
-                    line_edit.setPlaceholderText('Method')
-                combo.blockSignals(True)
-                combo.setCurrentText(method)
-                combo.blockSignals(False)
-                combo.currentTextChanged.connect(lambda text, r=row: self._method_combo_changed(r, text))
-                self.table.setCellWidget(row, 2, combo)
+            combo = QtWidgets.QComboBox()
+            combo.setEditable(False)
+            combo.setInsertPolicy(QtWidgets.QComboBox.InsertPolicy.NoInsert)
+            combo.setSizeAdjustPolicy(QtWidgets.QComboBox.SizeAdjustPolicy.AdjustToContents)
+            combo.addItems([''] + self.method_options)
+            combo.setCurrentText(method)
+            combo.setEnabled(self.mode == 'Ballooning')
+            combo.currentTextChanged.connect(partial(self._method_combo_changed, row))
+            self.table.setCellWidget(row, 2, combo)
             itm_result = QtWidgets.QTableWidgetItem(result)
             # Result editable in both modes (Ballooning: used for tol autofill; Inspection: writes to WO)
             itm_result.setFlags(itm_result.flags() | QtCore.Qt.ItemFlag.ItemIsEditable)
@@ -568,6 +684,11 @@ class MainWindow(QtWidgets.QMainWindow):
                 write_wo(self.pdf_path, self.current_wo, wo_results)
                 self._recompute_row_status(row)
             return
+        if self.mode == 'Ballooning' and col == 4:
+            text_item = self.table.item(row, col)
+            text_value = text_item.text() if text_item else ''
+            if self._try_apply_tolerance_entry(row, fid, text_value):
+                return
         # Ballooning: editing Method/Nom/LSL/USL persists to master
         if self.mode == 'Ballooning' and col in (2, 4, 5, 6):
             text = self.table.item(row, col).text()
@@ -662,6 +783,65 @@ class MainWindow(QtWidgets.QMainWindow):
         if upper in ('F', 'FAIL'):
             return 'FAIL'
         return stripped
+
+    def _string_has_tolerance(self, text: str) -> bool:
+        if not text:
+            return False
+        normalized = normalize_str(text)
+        if not normalized:
+            return False
+        lowered = normalized.lower()
+        if any(token in lowered for token in ('±', '+/-', '-/+', '+-', '-+')):
+            return True
+        plus_pos = normalized.find('+', 1)
+        if plus_pos != -1:
+            return True
+        minus_count = normalized.count('-')
+        if normalized.startswith('-'):
+            minus_count -= 1
+        return minus_count > 1
+
+    def _try_apply_tolerance_entry(self, row: int, fid: str, text: str) -> bool:
+        if not text:
+            return False
+        candidate = normalize_str(text)
+        if not self._string_has_tolerance(candidate):
+            return False
+        try:
+            nomv, lslv, uslv = parse_tolerance_expression(candidate)
+        except Exception:
+            return False
+        formatted_nom = format_number(nomv)
+        formatted_lsl = format_number(lslv)
+        formatted_usl = format_number(uslv)
+        updates = {
+            'nominal': formatted_nom,
+            'lsl': formatted_lsl,
+            'usl': formatted_usl,
+        }
+        if self.pdf_path:
+            update_feature(self.pdf_path, fid, updates)
+        for r in self.rows:
+            if r.get('id') == fid:
+                r.update(updates)
+                break
+        table = getattr(self, 'table', None)
+        if table is None:
+            return False
+        try:
+            table.blockSignals(True)
+            for col, value in ((4, formatted_nom), (5, formatted_lsl), (6, formatted_usl)):
+                item = table.item(row, col)
+                if item is None:
+                    item = QtWidgets.QTableWidgetItem(value)
+                    item.setFlags(item.flags() | QtCore.Qt.ItemFlag.ItemIsEditable)
+                    table.setItem(row, col, item)
+                else:
+                    item.setText(value)
+        finally:
+            table.blockSignals(False)
+        self._recompute_row_status(row)
+        return True
 
     def _table_selection_changed(self):
         if not self.pdf_path:
@@ -770,6 +950,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._clear_highlight_rect()
 
         self._apply_balloon_selection_visuals()
+        self._refresh_method_filter_options()
         self.statusBar().showMessage(f'Deleted {fid}', 3000)
 
     def _focus_on_feature(self, feature: dict):
@@ -821,13 +1002,50 @@ class MainWindow(QtWidgets.QMainWindow):
         if item.text() == text:
             return
         item.setText(text)
+        id_item = table.item(row, 0)
+        fid = id_item.text() if id_item else None
+        if not fid:
+            return
+        if self.mode == 'Ballooning' and self.pdf_path:
+            update_feature(self.pdf_path, fid, {'method': text})
+            for r in self.rows:
+                if r.get('id') == fid:
+                    r['method'] = text
+                    break
+        self._refresh_method_combobox_options()
+        self._refresh_method_filter_options()
+
+    def _refresh_method_filter_options(self):
+        combo = getattr(self, 'method_filter', None)
+        if not isinstance(combo, QtWidgets.QComboBox):
+            return
+        methods = sorted(
+            {
+                (row.get('method') or '').strip()
+                for row in self.rows
+                if (row.get('method') or '').strip()
+            },
+            key=lambda s: s.lower()
+        )
+        current = combo.currentText() if combo.count() else 'All'
+        combo.blockSignals(True)
+        combo.clear()
+        combo.addItem('All')
+        for value in methods:
+            combo.addItem(value)
+        if current and combo.findText(current, QtCore.Qt.MatchFlag.MatchExactly) >= 0:
+            combo.setCurrentText(current)
+        else:
+            combo.setCurrentIndex(0)
+        combo.blockSignals(False)
 
     def _refresh_method_combobox_options(self):
         table = getattr(self, 'table', None)
         if table is None:
             return
-        methods = []
-        seen = set()
+        base = list(self.method_options)
+        seen = {value.lower() for value in base}
+        extras = []
         for row in range(table.rowCount()):
             item = table.item(row, 2)
             if not item:
@@ -836,12 +1054,10 @@ class MainWindow(QtWidgets.QMainWindow):
             if not value:
                 continue
             key = value.lower()
-            if key in seen:
-                continue
-            seen.add(key)
-            methods.append(value)
-        methods.sort(key=lambda s: s.lower())
-
+            if key not in seen:
+                extras.append(value)
+                seen.add(key)
+        ordered_options = base + sorted(extras, key=lambda s: s.lower())
         for row in range(table.rowCount()):
             combo = table.cellWidget(row, 2)
             if not isinstance(combo, QtWidgets.QComboBox):
@@ -849,19 +1065,24 @@ class MainWindow(QtWidgets.QMainWindow):
             current = combo.currentText()
             combo.blockSignals(True)
             combo.clear()
-            combo.setEditable(self.mode == 'Ballooning')
-            combo.setInsertPolicy(QtWidgets.QComboBox.InsertPolicy.NoInsert)
-            combo.setSizeAdjustPolicy(QtWidgets.QComboBox.SizeAdjustPolicy.AdjustToContents)
             combo.addItem('')
-            for value in methods:
+            for value in ordered_options:
                 combo.addItem(value)
             combo.setCurrentText(current)
             combo.setEnabled(self.mode == 'Ballooning')
-            combo.setPlaceholderText('Method')
-            line_edit = combo.lineEdit()
-            if line_edit is not None:
-                line_edit.setPlaceholderText('Method')
             combo.blockSignals(False)
+        self._refresh_method_filter_options()
+    
+    def _edit_methods(self):
+        dlg = MethodListDialog(self, self.method_options)
+        if dlg.exec() != QtWidgets.QDialog.DialogCode.Accepted:
+            return
+        updated = dlg.get_methods()
+        if not updated:
+            QtWidgets.QMessageBox.warning(self, 'Inspection Methods', 'At least one method is required.')
+            return
+        self.method_options = sorted(updated, key=lambda s: s.lower())
+        self._refresh_method_combobox_options()
 
     def _shortcut_pick_mode(self):
         if self.mode != 'Ballooning' or not self.pdf_path:
@@ -881,6 +1102,7 @@ class MainWindow(QtWidgets.QMainWindow):
         else:
             self.pick_btn.setText('Pick-on-Print')
         self.statusBar().showMessage('Grab mode enabled (G)', 2000)
+        self._update_pdf_cursor()
 
     def toggle_pick(self, checked: bool):
         if not self.pdf_path or self.mode != 'Ballooning':
@@ -888,6 +1110,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.pick_btn.setChecked(False)
             self.pick_btn.blockSignals(False)
             self.pick_on_print = False
+            self._update_pdf_cursor()
             if not self.pdf_path:
                 QtWidgets.QMessageBox.information(self, 'No PDF', 'Open a PDF before placing balloons.')
             else:
@@ -895,6 +1118,7 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         self.pick_on_print = checked
         self.pick_btn.setText('Picking...' if checked else 'Pick-on-Print')
+        self._update_pdf_cursor()
 
     def fit_view(self):
         if self.pdf_view._pixmap_item:
@@ -904,6 +1128,15 @@ class MainWindow(QtWidgets.QMainWindow):
         self.show_balloons = not checked
         self.show_balloon_btn.setText('Show Balloons' if not self.show_balloons else 'Hide Balloons')
         self._update_balloon_visibility()
+
+    def _update_pdf_cursor(self):
+        view = getattr(self, 'pdf_view', None)
+        if view is None:
+            return
+        if self.pick_on_print and self.mode == 'Ballooning' and self.pdf_path:
+            view.setCursor(QtCore.Qt.CursorShape.CrossCursor)
+        else:
+            view.unsetCursor()
 
     def _update_balloon_visibility(self):
         for item in self.balloon_items:
@@ -947,6 +1180,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.pick_on_print = False
             self.pick_btn.setText('Pick-on-Print')
         self._update_balloon_size_controls_enabled()
+        self._update_pdf_cursor()
 
         title = 'Axis'
         if self.pdf_path:
@@ -1025,10 +1259,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self._update_mode_ui()
         self._update_page_controls_enabled()
         self._sync_page_spin()
+        self._refresh_method_filter_options()
+        self._update_pdf_cursor()
 
     def _load_rows(self):
         if not self.pdf_path:
             self.rows = []
+            self._refresh_method_filter_options()
             return
         rows = read_master(self.pdf_path)
         prepared = []
@@ -1052,7 +1289,15 @@ class MainWindow(QtWidgets.QMainWindow):
             except Exception:
                 first_radius = self.default_balloon_radius
             self.default_balloon_radius = max(6, min(60, int(round(first_radius))))
+        # merge any methods from the master into the available options
+        existing = {m.strip() for m in self.method_options if m.strip()}
+        for feature in prepared:
+            method_value = (feature.get('method') or '').strip()
+            if method_value and method_value not in existing:
+                existing.add(method_value)
+        self.method_options = sorted(existing, key=lambda s: s.lower())
         self._sync_balloon_size_spin(self.default_balloon_radius)
+        self._refresh_method_combobox_options()
 
     def _render_current_page(self):
         if not self.doc:
@@ -1067,8 +1312,7 @@ class MainWindow(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.warning(self, 'Render Failed', f'Unable to load page: {exc}')
             return
 
-        zoom = 1.5
-        pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom))
+        pix = page.get_pixmap(matrix=fitz.Matrix(PAGE_RENDER_ZOOM, PAGE_RENDER_ZOOM))
         qimage = QtGui.QImage.fromData(pix.tobytes('png'), 'PNG')
         self.pdf_view.load_page(qimage)
         self.pdf_view.fit_to_view()
@@ -1209,30 +1453,207 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.statusBar().showMessage(f"Added {new_feature.get('id', '')}", 3000)
 
-    def export_filtered(self):
-        if self.table.rowCount() == 0:
-            QtWidgets.QMessageBox.information(self, 'Export CSV', 'There are no rows to export.')
+    def export_pdfs(self):
+        if not self.pdf_path:
+            QtWidgets.QMessageBox.information(self, 'Export PDFs', 'Open a PDF before exporting.')
             return
+
         default_dir = Path(self.pdf_path).parent if self.pdf_path else Path.home()
-        default_name = Path(self.pdf_path).stem + '_filtered.csv' if self.pdf_path else 'filtered.csv'
-        path, _ = QtWidgets.QFileDialog.getSaveFileName(
+        default_base = Path(self.pdf_path).stem if self.pdf_path else 'axis'
+        default_path = default_dir / f'{default_base}_inspection.pdf'
+        selection, _ = QtWidgets.QFileDialog.getSaveFileName(
             self,
-            'Export Filtered CSV',
-            str(default_dir / default_name),
-            'CSV Files (*.csv)'
+            'Export PDFs',
+            str(default_path),
+            'PDF Files (*.pdf)'
         )
-        if not path:
+        if not selection:
             return
-        with open(path, 'w', newline='', encoding='utf-8') as handle:
-            writer = csv.writer(handle)
-            writer.writerow(['ID', 'Page', 'Method', 'Result', 'Nominal', 'LSL', 'USL', 'Status'])
-            for row_idx in range(self.table.rowCount()):
-                row_values = []
-                for col_idx in range(self.table.columnCount()):
-                    item = self.table.item(row_idx, col_idx)
-                    row_values.append(item.text() if item else '')
-                writer.writerow(row_values)
-        self.statusBar().showMessage(f'Exported {self.table.rowCount()} rows to {Path(path).name}', 4000)
+
+        inspection_path, balloon_path = self._derive_export_paths(Path(selection))
+
+        try:
+            inspection_path.parent.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
+
+        try:
+            rows = self._collect_visible_rows()
+            self._export_inspection_pdf(inspection_path, rows)
+            self._export_ballooned_pdf(balloon_path)
+        except Exception as exc:
+            QtWidgets.QMessageBox.critical(self, 'Export PDFs', f'Unable to export PDFs.\n{exc}')
+            return
+
+        msg_lines = [f'Inspection: {inspection_path}', f'Ballooned: {balloon_path}']
+        QtWidgets.QMessageBox.information(self, 'Export PDFs', 'Created files:\n' + '\n'.join(f'- {line}' for line in msg_lines))
+        self.statusBar().showMessage(f'Exported PDFs to {inspection_path.parent}', 5000)
+
+    def _collect_visible_rows(self):
+        rows = []
+        column_count = self.table.columnCount()
+        for row_idx in range(self.table.rowCount()):
+            row_values = []
+            for col_idx in range(column_count):
+                item = self.table.item(row_idx, col_idx)
+                if item is not None:
+                    row_values.append(item.text())
+                else:
+                    widget = self.table.cellWidget(row_idx, col_idx)
+                    if isinstance(widget, QtWidgets.QComboBox):
+                        row_values.append(widget.currentText())
+                    else:
+                        row_values.append('')
+            rows.append(row_values)
+        return rows
+
+    def _derive_export_paths(self, selected: Path) -> tuple[Path, Path]:
+        selected_path = selected
+        if selected_path.suffix.lower() != '.pdf':
+            selected_path = selected_path.with_suffix('.pdf')
+        base_dir = selected_path.parent
+        stem = selected_path.stem
+        inspection_suffix = '_inspection'
+        if stem.endswith(inspection_suffix) and len(stem) > len(inspection_suffix):
+            root_stem = stem[:-len(inspection_suffix)]
+        else:
+            root_stem = stem
+        if not root_stem:
+            root_stem = Path(self.pdf_path).stem if self.pdf_path else 'axis'
+        inspection_name = f'{root_stem}{inspection_suffix}.pdf'
+        ballooned_name = f'{root_stem}_ballooned.pdf'
+        inspection_path = selected_path.with_name(inspection_name)
+        balloon_path = selected_path.with_name(ballooned_name)
+        return inspection_path, balloon_path
+
+    def _export_inspection_pdf(self, destination: Path, rows):
+        doc = fitz.open()
+        try:
+            page_rect = fitz.paper_rect('letter')
+        except Exception:
+            page_rect = fitz.Rect(0, 0, 612, 792)
+        margin = 36
+        line_height = 16
+        columns = [
+            ('ID', 60, 0),
+            ('Page', 40, 1),
+            ('Method', 110, 0),
+            ('Result', 70, 2),
+            ('Nominal', 70, 2),
+            ('LSL', 70, 2),
+            ('USL', 70, 2),
+            ('Status', 50, 1),
+        ]
+        def draw_header(page, y):
+            x = margin
+            for title, width, _ in columns:
+                rect = fitz.Rect(x, y, x + width, y + line_height)
+                page.draw_rect(rect, color=(0.7, 0.7, 0.7), fill=(0.9, 0.9, 0.9), width=0.5)
+                page.insert_textbox(rect, title, fontsize=9.5, fontname='Times-Bold', color=(0, 0, 0), align=1)
+                x += width
+            return y + line_height
+
+        def start_page(include_title: bool):
+            page = doc.new_page(width=page_rect.width, height=page_rect.height)
+            y_pos = margin
+            if include_title:
+                title = f'Inspection Results - {Path(self.pdf_path).name}'
+                page.insert_text((margin, y_pos), title, fontsize=14, fontname='Times-Bold', color=(0, 0, 0))
+                y_pos += 20
+                if self.current_wo:
+                    wo_line = f'Work Order / Serial: {self.current_wo}'
+                    page.insert_text((margin, y_pos), wo_line, fontsize=10, fontname='Times-Roman', color=(0, 0, 0))
+                    y_pos += 16
+                timestamp = datetime.now().strftime('%Y-%m-%d %H:%M')
+                page.insert_text((margin, y_pos), f'Exported: {timestamp}', fontsize=9, fontname='Times-Roman', color=(0.3, 0.3, 0.3))
+                y_pos += 18
+            elif self.current_wo:
+                # repeat WO on subsequent pages for clarity
+                wo_line = f'Work Order / Serial: {self.current_wo}'
+                page.insert_text((margin, y_pos), wo_line, fontsize=10, fontname='Times-Roman', color=(0, 0, 0))
+                y_pos += 16
+            y_pos = draw_header(page, y_pos)
+            return page, y_pos
+
+        def ensure_space(page, y_pos):
+            if y_pos + line_height > page_rect.height - margin:
+                return start_page(False)
+            return page, y_pos
+
+        status_colors = {
+            'PASS': ((200 / 255, 235 / 255, 200 / 255), (0.15, 0.45, 0.15)),
+            'FAIL': ((247 / 255, 205 / 255, 205 / 255), (0.55, 0.15, 0.15)),
+        }
+
+        page, cursor_y = start_page(True)
+
+        if not rows:
+            info_text = 'No inspection rows available for the current filters.'
+            page.insert_text((margin, cursor_y + 12), info_text, fontsize=11, fontname='Times-Roman', color=(0.25, 0.25, 0.25))
+        else:
+            for row in rows:
+                page, cursor_y = ensure_space(page, cursor_y)
+                x = margin
+                status_value = row[7].strip().upper() if len(row) > 7 else ''
+                fill_color, text_color = status_colors.get(status_value, ((0.92, 0.92, 0.92), (0.2, 0.2, 0.2)))
+                for idx, (value, (title, width, align)) in enumerate(zip(row, columns)):
+                    rect = fitz.Rect(x, cursor_y, x + width, cursor_y + line_height)
+                    if idx in (3, 7):
+                        page.draw_rect(rect, color=None, fill=fill_color, width=0)
+                    if idx == 7 and status_value in status_colors:
+                        font_name = 'Times-Bold'
+                        color = text_color
+                    else:
+                        font_name = 'Times-Roman'
+                        color = (0, 0, 0)
+                    clean_value = (value or '').replace('\n', ' ')
+                    page.insert_textbox(rect, clean_value, fontsize=9.5, fontname=font_name, color=color, align=align)
+                    x += width
+                cursor_y += line_height
+
+        doc.save(destination, garbage=4, deflate=True)
+        doc.close()
+
+    def _export_ballooned_pdf(self, destination: Path):
+        doc = fitz.open(self.pdf_path)
+        scale = 1.0 / PAGE_RENDER_ZOOM
+        circle_color = (220 / 255, 40 / 255, 40 / 255)
+        fill_color = (1.0, 230 / 255, 230 / 255)
+        try:
+            for page_index in range(doc.page_count):
+                page = doc.load_page(page_index)
+                for feature in self.rows:
+                    try:
+                        feature_page = int(feature.get('page', '1')) - 1
+                    except Exception:
+                        feature_page = 0
+                    if feature_page != page_index:
+                        continue
+                    try:
+                        x = float(feature.get('x', 0)) * scale
+                        y = float(feature.get('y', 0)) * scale
+                        w = float(feature.get('w', 0)) * scale
+                        h = float(feature.get('h', 0)) * scale
+                        bx = float(feature.get('bx', 0)) * scale
+                        by = float(feature.get('by', 0)) * scale
+                        radius = float(feature.get('br', self.default_balloon_radius)) * scale
+                    except Exception:
+                        continue
+                    center_x = x + (w / 2.0) + bx
+                    center_y = y + (h / 2.0) + by
+                    page.draw_circle((center_x, center_y), radius, color=circle_color, fill=fill_color, width=1.5)
+                    label = feature.get('id', '')
+                    match = re.search(r'(\d+)$', label)
+                    text = match.group(1) if match else label
+                    font_size = max(8.0, radius * 1.15)
+                    text_width = fitz.get_text_length(text, fontname='Times-Bold', fontsize=font_size)
+                    ascent = font_size * 0.7
+                    x_pos = center_x - (text_width / 2.0)
+                    y_pos = center_y + (ascent / 2.0)
+                    page.insert_text((x_pos, y_pos), text, fontsize=font_size, fontname='Times-Bold', color=(0, 0, 0))
+            doc.save(destination, garbage=4, deflate=True)
+        finally:
+            doc.close()
 
     def _balloon_size_changed(self, value: int):
         self.default_balloon_radius = value
