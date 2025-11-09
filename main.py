@@ -465,21 +465,23 @@ class MainWindow(QtWidgets.QMainWindow):
             self.table.setItem(row, 0, make_item(id_, False))
             self.table.setItem(row, 1, make_item(page, False))
             can_edit_specs = (self.mode == 'Ballooning')
-            self.table.setItem(row, 2, make_item(method, False))
-            combo = QtWidgets.QComboBox()
-            combo.setEditable(True)
-            combo.setInsertPolicy(QtWidgets.QComboBox.InsertPolicy.NoInsert)
-            combo.setSizeAdjustPolicy(QtWidgets.QComboBox.SizeAdjustPolicy.AdjustToContents)
-            combo.setEnabled(self.mode == 'Ballooning')
-            combo.setPlaceholderText('Method')
-            line_edit = combo.lineEdit()
-            if line_edit is not None:
-                line_edit.setPlaceholderText('Method')
-            combo.blockSignals(True)
-            combo.setCurrentText(method)
-            combo.blockSignals(False)
-            combo.currentTextChanged.connect(lambda text, r=row: self._method_combo_changed(r, text))
-            self.table.setCellWidget(row, 2, combo)
+            method_item = make_item(method, False)
+            self.table.setItem(row, 2, method_item)
+            if self.mode == 'Ballooning':
+                combo = QtWidgets.QComboBox()
+                combo.setEditable(True)
+                combo.setInsertPolicy(QtWidgets.QComboBox.InsertPolicy.NoInsert)
+                combo.setSizeAdjustPolicy(QtWidgets.QComboBox.SizeAdjustPolicy.AdjustToContents)
+                combo.setEnabled(True)
+                combo.setPlaceholderText('Method')
+                line_edit = combo.lineEdit()
+                if line_edit is not None:
+                    line_edit.setPlaceholderText('Method')
+                combo.blockSignals(True)
+                combo.setCurrentText(method)
+                combo.blockSignals(False)
+                combo.currentTextChanged.connect(lambda text, r=row: self._method_combo_changed(r, text))
+                self.table.setCellWidget(row, 2, combo)
             itm_result = QtWidgets.QTableWidgetItem(result)
             # Result editable in both modes (Ballooning: used for tol autofill; Inspection: writes to WO)
             itm_result.setFlags(itm_result.flags() | QtCore.Qt.ItemFlag.ItemIsEditable)
@@ -627,7 +629,14 @@ class MainWindow(QtWidgets.QMainWindow):
             'FAIL': QtGui.QColor(247, 205, 205),
             '—': QtGui.QColor(235, 235, 235),
         }
+        text_colors = {
+            'PASS': QtGui.QColor(10, 80, 10),
+            'FAIL': QtGui.QColor(140, 20, 20),
+            '—': QtGui.QColor(200, 200, 200),
+        }
+        bold_status = status in ('PASS', 'FAIL')
         color = palette.get(status.upper() if isinstance(status, str) else status)
+        text_color = text_colors.get(status.upper() if isinstance(status, str) else status, QtGui.QColor(220, 220, 220))
         for col in (3, 7):
             item = table.item(row, col)
             if not item:
@@ -636,6 +645,10 @@ class MainWindow(QtWidgets.QMainWindow):
                 item.setBackground(QtGui.QBrush(color))
             else:
                 item.setBackground(QtGui.QBrush())
+            item.setForeground(QtGui.QBrush(text_color))
+            font = item.font()
+            font.setBold(bold_status)
+            item.setFont(font)
 
     def _normalize_result_entry(self, value: str) -> str:
         if value is None:
