@@ -415,6 +415,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.total_pages = 0
         self.method_options = ['CMM', 'Pin Gage', 'Visual']
         self._suppress_auto_focus = False
+        self._undo_stack = []
+        self._undo_in_progress = False
 
         self._build_ui()
         self._refresh_method_combobox_options()
@@ -436,6 +438,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.shortcut_pick.activated.connect(self._shortcut_pick_mode)
         self.shortcut_grab = QtGui.QShortcut(QtGui.QKeySequence('G'), self)
         self.shortcut_grab.activated.connect(self._shortcut_grab_mode)
+        self.shortcut_undo = QtGui.QShortcut(QtGui.QKeySequence(QtGui.QKeySequence.StandardKey.Undo), self)
+        self.shortcut_undo.activated.connect(self._shortcut_undo)
 
         fit_btn = QtWidgets.QPushButton('Fit')
         fit_btn.clicked.connect(self.fit_view)
@@ -978,31 +982,10 @@ class MainWindow(QtWidgets.QMainWindow):
         if confirm != QtWidgets.QMessageBox.StandardButton.Yes:
             return
 
-        delete_feature(self.pdf_path, fid)
-        self.rows = [r for r in self.rows if r.get('id') != fid]
-
-        try:
-            table.blockSignals(True)
-            table.removeRow(row)
-        finally:
-            table.blockSignals(False)
-
-        for item in list(self.balloon_items):
-            if item.feature.get('id') == fid:
-                try:
-                    self.pdf_view.scene().removeItem(item)
-                except Exception:
-                    pass
-                self.balloon_items.remove(item)
-                break
-
-        if self.selected_feature_id == fid:
-            self.selected_feature_id = None
-            self._clear_highlight_rect()
-
-        self._apply_balloon_selection_visuals()
-        self._refresh_method_filter_options()
-        self.statusBar().showMessage(f'Deleted {fid}', 3000)
+        snapshot = self._remove_feature(fid, row_hint=row)
+        if snapshot:
+            self._push_undo(lambda snap=snapshot: self._undo_deleted_feature(snap), f'Delete {fid}')
+            self.statusBar().showMessage(f'Deleted {fid}', 3000)
 
     def _focus_on_feature(self, feature: dict):
         if not self.pdf_view._pixmap_item:
@@ -1155,6 +1138,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.statusBar().showMessage('Grab mode enabled (G)', 2000)
         self._update_pdf_cursor()
 
+    def _shortcut_undo(self):
+        self._undo_last_action()
+
     def toggle_pick(self, checked: bool):
         if not self.pdf_path or self.mode != 'Ballooning':
             self.pick_btn.blockSignals(True)
@@ -1291,6 +1277,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.statusBar().showMessage(f'Loaded {Path(path).name}', 4000)
 
     def _clear_loaded_pdf(self):
+        self._undo_stack.clear()
+        self._undo_in_progress = False
         if self.doc:
             try:
                 self.doc.close()
@@ -1503,6 +1491,10 @@ class MainWindow(QtWidgets.QMainWindow):
         if page_idx == self.current_page:
             self._add_balloon_item(new_feature)
             self._apply_balloon_selection_visuals()
+
+        fid = new_feature.get('id')
+        if fid:
+            self._push_undo(lambda feature_id=fid: self._undo_added_feature(feature_id), f'Add {fid}')
 
         self.statusBar().showMessage(f"Added {new_feature.get('id', '')}", 3000)
 
@@ -1850,6 +1842,114 @@ class MainWindow(QtWidgets.QMainWindow):
         for row in self.rows:
             payload.append({key: row.get(key, '') for key in MASTER_HEADER})
         write_master(self.pdf_path, payload)
+
+    def _push_undo(self, handler, description: str):
+        if not callable(handler):
+            return
+        if self._undo_in_progress:
+            return
+        if self.mode != 'Ballooning':
+            return
+        self._undo_stack.append((description, handler))
+        max_depth = 50
+        if len(self._undo_stack) > max_depth:
+            self._undo_stack.pop(0)
+
+    def _undo_last_action(self):
+        if self.mode != 'Ballooning':
+            self.statusBar().showMessage('Undo is only available in Ballooning mode.', 2000)
+            return
+        if not self._undo_stack:
+            self.statusBar().showMessage('Nothing to undo.', 2000)
+            return
+        description, handler = self._undo_stack.pop()
+        self._undo_in_progress = True
+        try:
+            handler()
+        except Exception as exc:
+            self.statusBar().showMessage('Undo failed.', 4000)
+            print(f'Undo failed: {exc}', file=sys.stderr)
+        finally:
+            self._undo_in_progress = False
+        if description:
+            self.statusBar().showMessage(f'Undo: {description}', 3000)
+
+    def _undo_added_feature(self, fid: str):
+        if not fid:
+            return
+        self._remove_feature(fid, persist=True)
+        self.statusBar().showMessage(f'Removed {fid}', 3000)
+
+    def _undo_deleted_feature(self, snapshot: dict):
+        if not snapshot:
+            return
+        fid = snapshot.get('id')
+        self._restore_feature_snapshot(snapshot)
+        if fid:
+            self.statusBar().showMessage(f'Restored {fid}', 3000)
+
+    def _restore_feature_snapshot(self, snapshot: dict):
+        if not snapshot or not self.pdf_path:
+            return
+        snapshot_copy = dict(snapshot)
+        row_index = snapshot_copy.pop('_row_index', None)
+        fid = snapshot_copy.get('id')
+        if not fid:
+            return
+        master_row = {key: snapshot_copy.get(key, '') for key in MASTER_HEADER}
+        try:
+            rows = read_master(self.pdf_path)
+        except Exception:
+            rows = []
+        rows = [dict(r) for r in rows if r.get('id') != fid]
+        rows.append(master_row)
+
+        def sort_key(row):
+            label = row.get('id') or ''
+            match = re.search(r'(\d+)$', label)
+            return int(match.group(1)) if match else 0
+
+        rows.sort(key=sort_key)
+        write_master(self.pdf_path, rows)
+
+        snapshot_copy['_pdf'] = self.pdf_path
+        self.rows = [r for r in self.rows if r.get('id') != fid]
+        if row_index is None or row_index < 0 or row_index > len(self.rows):
+            self.rows.append(snapshot_copy)
+        else:
+            self.rows.insert(row_index, snapshot_copy)
+        self.selected_feature_id = fid
+        self._suppress_auto_focus = True
+        self.refresh_table()
+        self._rebuild_balloons()
+        self._apply_balloon_selection_visuals()
+
+    def _remove_feature(self, fid: str, row_hint: int | None = None, persist: bool = True) -> dict | None:
+        if not fid:
+            return None
+        feature_snapshot = None
+        index = None
+        for idx, feature in enumerate(self.rows):
+            if feature.get('id') == fid:
+                feature_snapshot = dict(feature)
+                index = idx
+                break
+        if feature_snapshot is None:
+            return None
+        if persist and self.pdf_path:
+            delete_feature(self.pdf_path, fid)
+        if self.selected_feature_id == fid:
+            self.selected_feature_id = None
+            self._clear_highlight_rect()
+        self.rows = [r for r in self.rows if r.get('id') != fid]
+        feature_snapshot['_row_index'] = index if index is not None else -1
+        self.refresh_table()
+        if row_hint is not None and self.table.rowCount() > 0:
+            target = max(0, min(row_hint, self.table.rowCount() - 1))
+            self.table.selectRow(target)
+        self._rebuild_balloons()
+        self._apply_balloon_selection_visuals()
+        return feature_snapshot
 
 def main():
     app = QtWidgets.QApplication(sys.argv)
