@@ -290,9 +290,11 @@ class PDFView(QtWidgets.QGraphicsView):
         self.setSceneRect(self._pixmap_item.boundingRect())
 
     def fit_to_view(self):
-        if self.scene() is not None:
-            self.fitInView(self.sceneRect(), QtCore.Qt.AspectRatioMode.KeepAspectRatio)
-            self._current_scale = 1.0
+        if self.scene() is None or self.sceneRect().isNull():
+            return
+        self.fitInView(self.sceneRect(), QtCore.Qt.AspectRatioMode.KeepAspectRatio)
+        # keep _current_scale aligned with the actual view transform
+        self._current_scale = self.transform().m11()
 
     def wheelEvent(self, event: QtGui.QWheelEvent):
         # zoom towards mouse position
@@ -309,7 +311,7 @@ class PDFView(QtWidgets.QGraphicsView):
         if factor == 1.0:
             return
         self.scale(factor, factor)
-        self._current_scale = new_scale
+        self._current_scale = self.transform().m11()
         event.accept()
         
         # keep rubber band consistent
@@ -320,14 +322,16 @@ class PDFView(QtWidgets.QGraphicsView):
         if self._pixmap_item is None:
             return
         target = max(self._min_scale, min(self._max_scale, float(target)))
-        if self._current_scale == 0:
-            self._current_scale = 1.0
-        factor = target / self._current_scale
-        if abs(factor - 1.0) > 1e-6:
-            self.scale(factor, factor)
-            self._current_scale = target
+        prev_anchor = self.transformationAnchor()
+        if focus_point is None:
+            focus_point = self.mapToScene(self.viewport().rect().center())
+        self.setTransformationAnchor(QtWidgets.QGraphicsView.ViewportAnchor.AnchorViewCenter)
+        self.resetTransform()
+        self.scale(target, target)
+        self._current_scale = self.transform().m11()
+        self.centerOn(focus_point)
+        self.setTransformationAnchor(prev_anchor)
         if focus_point is not None:
-            self.centerOn(focus_point)
             self.ensureVisible(QtCore.QRectF(focus_point.x() - 20, focus_point.y() - 20, 40, 40), 10, 10)
 
     def mousePressEvent(self, event):
@@ -593,6 +597,11 @@ class MainWindow(QtWidgets.QMainWindow):
             combo.setEditable(False)
             combo.setInsertPolicy(QtWidgets.QComboBox.InsertPolicy.NoInsert)
             combo.setSizeAdjustPolicy(QtWidgets.QComboBox.SizeAdjustPolicy.AdjustToContents)
+            combo.setStyleSheet(
+                "QComboBox { color: rgb(235, 235, 235); } "
+                "QComboBox::drop-down { border: none; } "
+                "QComboBox:disabled { color: rgb(225, 225, 225); background-color: rgb(45, 45, 45); }"
+            )
             combo.addItems([''] + self.method_options)
             combo.setCurrentText(method)
             combo.setEnabled(self.mode == 'Ballooning')
@@ -683,6 +692,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 wo_results[fid] = val
                 write_wo(self.pdf_path, self.current_wo, wo_results)
                 self._recompute_row_status(row)
+            self._advance_result_edit(row)
             return
         if self.mode == 'Ballooning' and col == 4:
             text_item = self.table.item(row, col)
@@ -704,6 +714,27 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         # no further handling for other columns
         return
+
+    def _advance_result_edit(self, current_row: int):
+        """After committing a Result value, focus the next row's Result cell for quick data entry."""
+        table = getattr(self, 'table', None)
+        if table is None:
+            return
+        next_row = current_row + 1
+        while next_row < table.rowCount():
+            next_item = table.item(next_row, 3)
+            if next_item is not None:
+                table.setCurrentCell(next_row, 3)
+
+                def _start_edit():
+                    try:
+                        table.editItem(next_item)
+                    except Exception:
+                        pass
+
+                QtCore.QTimer.singleShot(0, _start_edit)
+                break
+            next_row += 1
 
 
     def _recompute_row_status(self, row: int):
@@ -1504,6 +1535,28 @@ class MainWindow(QtWidgets.QMainWindow):
                         row_values.append(widget.currentText())
                     else:
                         row_values.append('')
+            # Ensure status reflects the latest logic even if the table paint left it blank
+            if column_count > 7:
+                status_text = (row_values[7] or '').strip().upper()
+                if status_text not in ('PASS', 'FAIL', '—'):
+                    result_text = (row_values[3] or '').strip()
+                    lsl_text = (row_values[5] or '').strip()
+                    usl_text = (row_values[6] or '').strip()
+                    computed = '—'
+                    if result_text:
+                        upper = result_text.upper()
+                        if upper in ('PASS', 'FAIL'):
+                            computed = upper
+                        else:
+                            try:
+                                value = float(result_text)
+                                lsl_val = float(lsl_text) if lsl_text else None
+                                usl_val = float(usl_text) if usl_text else None
+                                if lsl_val is not None and usl_val is not None:
+                                    computed = 'PASS' if lsl_val <= value <= usl_val else 'FAIL'
+                            except Exception:
+                                computed = '—'
+                    row_values[7] = computed
             rows.append(row_values)
         return rows
 
@@ -1532,26 +1585,30 @@ class MainWindow(QtWidgets.QMainWindow):
             page_rect = fitz.paper_rect('letter')
         except Exception:
             page_rect = fitz.Rect(0, 0, 612, 792)
+        if page_rect.width > page_rect.height:
+            # enforce portrait orientation for the inspection report
+            page_rect = fitz.Rect(0, 0, page_rect.height, page_rect.width)
         margin = 36
         line_height = 16
         columns = [
             ('ID', 60, 0),
             ('Page', 40, 1),
             ('Method', 110, 0),
-            ('Result', 70, 2),
-            ('Nominal', 70, 2),
-            ('LSL', 70, 2),
-            ('USL', 70, 2),
-            ('Status', 50, 1),
+            ('Result', 80, 2),
+            ('Nominal', 80, 2),
+            ('LSL', 80, 2),
+            ('USL', 80, 2),
+            ('Status', 65, 1),
         ]
         def draw_header(page, y):
+            header_height = line_height + 6
             x = margin
             for title, width, _ in columns:
-                rect = fitz.Rect(x, y, x + width, y + line_height)
+                rect = fitz.Rect(x, y, x + width, y + header_height)
                 page.draw_rect(rect, color=(0.7, 0.7, 0.7), fill=(0.9, 0.9, 0.9), width=0.5)
-                page.insert_textbox(rect, title, fontsize=9.5, fontname='Times-Bold', color=(0, 0, 0), align=1)
+                page.insert_textbox(rect, title, fontsize=10, fontname='Times-Bold', color=(0, 0, 0), align=1)
                 x += width
-            return y + line_height
+            return y + header_height
 
         def start_page(include_title: bool):
             page = doc.new_page(width=page_rect.width, height=page_rect.height)
@@ -1581,9 +1638,39 @@ class MainWindow(QtWidgets.QMainWindow):
             return page, y_pos
 
         status_colors = {
-            'PASS': ((200 / 255, 235 / 255, 200 / 255), (0.15, 0.45, 0.15)),
-            'FAIL': ((247 / 255, 205 / 255, 205 / 255), (0.55, 0.15, 0.15)),
+            'PASS': ((200 / 255, 235 / 255, 200 / 255), (0, 0, 0)),
+            'FAIL': ((247 / 255, 205 / 255, 205 / 255), (0.55, 0, 0)),
         }
+
+        def compute_status_from_row(row_values: list[str]) -> str:
+            if not row_values:
+                return '—'
+            status_raw = row_values[7] if len(row_values) > 7 else ''
+            if status_raw:
+                upper = status_raw.strip().upper()
+                if upper in ('PASS', 'FAIL'):
+                    return upper
+            result_text = row_values[3].strip() if len(row_values) > 3 and row_values[3] else ''
+            if not result_text:
+                return '—'
+            upper_res = result_text.upper()
+            if upper_res in ('PASS', 'FAIL'):
+                return upper_res
+            try:
+                value = float(result_text)
+            except Exception:
+                return '—'
+            try:
+                lsl_val = float(row_values[5]) if len(row_values) > 5 and row_values[5] else None
+            except Exception:
+                lsl_val = None
+            try:
+                usl_val = float(row_values[6]) if len(row_values) > 6 and row_values[6] else None
+            except Exception:
+                usl_val = None
+            if lsl_val is not None and usl_val is not None:
+                return 'PASS' if lsl_val <= value <= usl_val else 'FAIL'
+            return '—'
 
         page, cursor_y = start_page(True)
 
@@ -1592,21 +1679,31 @@ class MainWindow(QtWidgets.QMainWindow):
             page.insert_text((margin, cursor_y + 12), info_text, fontsize=11, fontname='Times-Roman', color=(0.25, 0.25, 0.25))
         else:
             for row in rows:
+                row_len = len(row)
                 page, cursor_y = ensure_space(page, cursor_y)
                 x = margin
-                status_value = row[7].strip().upper() if len(row) > 7 else ''
-                fill_color, text_color = status_colors.get(status_value, ((0.92, 0.92, 0.92), (0.2, 0.2, 0.2)))
-                for idx, (value, (title, width, align)) in enumerate(zip(row, columns)):
+                status_value = compute_status_from_row(row)
+                status_key = status_value
+                fill_color, text_color = status_colors.get(status_key, ((0.92, 0.92, 0.92), (0.2, 0.2, 0.2)))
+                for idx, (title, width, align) in enumerate(columns):
+                    value = row[idx] if idx < row_len else ''
                     rect = fitz.Rect(x, cursor_y, x + width, cursor_y + line_height)
                     if idx in (3, 7):
                         page.draw_rect(rect, color=None, fill=fill_color, width=0)
-                    if idx == 7 and status_value in status_colors:
-                        font_name = 'Times-Bold'
-                        color = text_color
+                    if idx == 7:
+                        if status_key in status_colors:
+                            font_name = 'Times-Bold'
+                            color = text_color
+                            display_value = status_key
+                        else:
+                            font_name = 'Times-Roman'
+                            color = (0, 0, 0)
+                            display_value = status_value or '-'
                     else:
                         font_name = 'Times-Roman'
                         color = (0, 0, 0)
-                    clean_value = (value or '').replace('\n', ' ')
+                        display_value = value or ''
+                    clean_value = str(display_value).replace('\n', ' ')
                     page.insert_textbox(rect, clean_value, fontsize=9.5, fontname=font_name, color=color, align=align)
                     x += width
                 cursor_y += line_height
