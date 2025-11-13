@@ -414,6 +414,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.page_spin = None
         self.total_pages = 0
         self.method_options = ['CMM', 'Pin Gage', 'Visual']
+        self._suppress_auto_focus = False
 
         self._build_ui()
         self._refresh_method_combobox_options()
@@ -901,6 +902,25 @@ class MainWindow(QtWidgets.QMainWindow):
                 break
         if not feature:
             return
+        if self._suppress_auto_focus:
+            self._suppress_auto_focus = False
+            self.selected_feature_id = fid
+            self._apply_balloon_selection_visuals()
+            try:
+                x = float(feature.get('x', 0))
+                y = float(feature.get('y', 0))
+                w = float(feature.get('w', 0))
+                h = float(feature.get('h', 0))
+            except Exception:
+                self._clear_highlight_rect()
+                return
+            rect_item = self._ensure_highlight_rect()
+            if rect_item is not None:
+                rect_item.setRect(QtCore.QRectF(x, y, w, h))
+                rect_item.setVisible(True)
+            else:
+                self._clear_highlight_rect()
+            return
         self.selected_feature_id = fid
         try:
             page_idx = int(feature.get('page', '1')) - 1
@@ -1242,29 +1262,29 @@ class MainWindow(QtWidgets.QMainWindow):
             doc = fitz.open(path)
         except Exception as exc:
             QtWidgets.QMessageBox.critical(self, 'Open PDF', f'Could not open PDF file.\n{exc}')
-            return
-
-        self.doc = doc
-        self.pdf_path = path
-        self.current_page = 0
-        master_path = f"{path}.balloons.csv"
-        had_master = os.path.exists(master_path)
-        ensure_master(path)
-        existing_wos = list_workorders(path)
-        self.total_pages = self.doc.page_count if self.doc else 0
-        self._update_page_controls_enabled()
-        self._sync_page_spin()
-        self._load_rows()
-
-        if had_master:
-            if not self._prompt_session(existing_wos):
-                self._clear_loaded_pdf()
-                return
-        else:
             # new PDF: default to ballooning without prompting
             self.mode = 'Ballooning'
             self.current_wo = None
             self._update_mode_ui()
+            return
+
+        # clear any previous document before loading the new one
+        self._clear_loaded_pdf()
+
+        self.doc = doc
+        self.pdf_path = path
+        self.total_pages = doc.page_count
+        self.current_page = 0
+
+        try:
+            ensure_master(path)
+        except Exception as exc:
+            QtWidgets.QMessageBox.warning(self, 'Master Data', f'Could not prepare master data for this PDF.\n{exc}')
+
+        self._load_rows()
+        self._update_mode_ui()
+        self._update_page_controls_enabled()
+        self._sync_page_spin()
 
         self._render_current_page()
         self.refresh_table()
@@ -1282,6 +1302,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.total_pages = 0
         self.rows = []
         self._clear_balloon_items()
+        self._suppress_auto_focus = False
         self.selected_feature_id = None
         self._clear_highlight_rect()
         if self.pdf_view.scene():
@@ -1470,6 +1491,7 @@ class MainWindow(QtWidgets.QMainWindow):
         new_feature = add_feature(self.pdf_path, feature_payload)
         new_feature['_pdf'] = self.pdf_path
         new_feature['br'] = str(radius_value)
+        self._suppress_auto_focus = True
         self.rows.append(new_feature)
         self.selected_feature_id = new_feature.get('id')
         self.refresh_table()
