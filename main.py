@@ -1268,6 +1268,9 @@ class MainWindow(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.warning(self, 'Master Data', f'Could not prepare master data for this PDF.\n{exc}')
 
         self._load_rows()
+        if not self._prompt_session(list_workorders(self.pdf_path)):
+            self.mode = 'Ballooning'
+            self.current_wo = None
         self._update_mode_ui()
         self._update_page_controls_enabled()
         self._sync_page_spin()
