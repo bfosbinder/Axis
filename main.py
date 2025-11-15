@@ -282,12 +282,36 @@ class PDFView(QtWidgets.QGraphicsView):
         self.setDragMode(QtWidgets.QGraphicsView.DragMode.ScrollHandDrag)
         self.setTransformationAnchor(QtWidgets.QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         self.setResizeAnchor(QtWidgets.QGraphicsView.ViewportAnchor.AnchorUnderMouse)
+        self._last_render_scale = None  # [CRISP-ZOOM]
+        self.setCacheMode(QtWidgets.QGraphicsView.CacheModeFlag.CacheBackground)  # [ZOOM-DEBOUNCE]
+        self.setViewportUpdateMode(QtWidgets.QGraphicsView.ViewportUpdateMode.SmartViewportUpdate)  # [ZOOM-DEBOUNCE]
 
-    def load_page(self, qimage: QtGui.QImage):
-        self.scene().clear()
+    def load_page(self, qimage: QtGui.QImage, scene_size: tuple[float, float] | None = None):
+        scene = self.scene()
+        if scene is None:
+            return
+        if self._pixmap_item is not None:
+            try:
+                scene.removeItem(self._pixmap_item)
+            except Exception:
+                pass
+            self._pixmap_item = None
         pix = QtGui.QPixmap.fromImage(qimage)
-        self._pixmap_item = self.scene().addPixmap(pix)
-        self.setSceneRect(self._pixmap_item.boundingRect())
+        self._pixmap_item = scene.addPixmap(pix)
+        if scene_size is not None:
+            width, height = scene_size
+            try:
+                dpr = float(pix.devicePixelRatio())
+            except Exception:
+                dpr = 1.0
+            logical_width = pix.width() / dpr
+            logical_height = pix.height() / dpr
+            if logical_width > 0 and logical_height > 0:
+                scale = width / logical_width
+                self._pixmap_item.setScale(scale)  # [CRISP-ZOOM]
+            self.setSceneRect(QtCore.QRectF(0, 0, width, height))
+        else:
+            self.setSceneRect(self._pixmap_item.boundingRect())
 
     def fit_to_view(self):
         if self.scene() is None or self.sceneRect().isNull():
@@ -295,6 +319,7 @@ class PDFView(QtWidgets.QGraphicsView):
         self.fitInView(self.sceneRect(), QtCore.Qt.AspectRatioMode.KeepAspectRatio)
         # keep _current_scale aligned with the actual view transform
         self._current_scale = self.transform().m11()
+        self._last_render_scale = self._current_scale  # [CRISP-ZOOM]
 
     def wheelEvent(self, event: QtGui.QWheelEvent):
         # zoom towards mouse position
@@ -317,6 +342,8 @@ class PDFView(QtWidgets.QGraphicsView):
         # keep rubber band consistent
         if self._rubber.isVisible():
             self._rubber.hide()
+        if hasattr(self.controller, '_schedule_rerender_for_zoom'):
+            self.controller._schedule_rerender_for_zoom(self._current_scale)  # [ZOOM-DEBOUNCE]
 
     def set_zoom(self, target: float, focus_point: QtCore.QPointF = None):
         if self._pixmap_item is None:
@@ -333,6 +360,8 @@ class PDFView(QtWidgets.QGraphicsView):
         self.setTransformationAnchor(prev_anchor)
         if focus_point is not None:
             self.ensureVisible(QtCore.QRectF(focus_point.x() - 20, focus_point.y() - 20, 40, 40), 10, 10)
+        if hasattr(self.controller, '_schedule_rerender_for_zoom'):
+            self.controller._schedule_rerender_for_zoom(self._current_scale)  # [ZOOM-DEBOUNCE]
 
     def mousePressEvent(self, event):
         if self.controller.mode == 'Ballooning' and self.controller.pick_on_print:
@@ -417,6 +446,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self._suppress_auto_focus = False
         self._undo_stack = []
         self._undo_in_progress = False
+        self._zoom_rerender_timer = QtCore.QTimer(self)  # [ZOOM-DEBOUNCE]
+        self._zoom_rerender_timer.setSingleShot(True)  # [ZOOM-DEBOUNCE]
+        self._zoom_rerender_timer.timeout.connect(self._zoom_rerender_timeout)  # [ZOOM-DEBOUNCE]
+        self._pending_zoom_scale = None  # [ZOOM-DEBOUNCE]
+        self._balloons_built_for_page = None  # [ZOOM-DEBOUNCE]
 
         self._build_ui()
         self._refresh_method_combobox_options()
@@ -932,6 +966,7 @@ class MainWindow(QtWidgets.QMainWindow):
             page_idx = 0
         page_idx = max(0, page_idx)
         if page_idx != self.current_page:
+            self._balloons_built_for_page = None  # [ZOOM-DEBOUNCE]
             self.current_page = page_idx
             self._render_current_page()
         self._focus_on_feature(feature)
@@ -1276,12 +1311,15 @@ class MainWindow(QtWidgets.QMainWindow):
         self._sync_page_spin()
 
         self._render_current_page()
+        self.fit_view()
         self.refresh_table()
         self.statusBar().showMessage(f'Loaded {Path(path).name}', 4000)
 
     def _clear_loaded_pdf(self):
         self._undo_stack.clear()
         self._undo_in_progress = False
+        self._zoom_rerender_timer.stop()  # [ZOOM-DEBOUNCE]
+        self._pending_zoom_scale = None  # [ZOOM-DEBOUNCE]
         if self.doc:
             try:
                 self.doc.close()
@@ -1296,6 +1334,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._suppress_auto_focus = False
         self.selected_feature_id = None
         self._clear_highlight_rect()
+        if getattr(self, 'pdf_view', None):
+            self.pdf_view._last_render_scale = None  # [CRISP-ZOOM]
         if self.pdf_view.scene():
             self.pdf_view.scene().clear()
         self.table.setRowCount(0)
@@ -1304,6 +1344,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._sync_page_spin()
         self._refresh_method_filter_options()
         self._update_pdf_cursor()
+        self._balloons_built_for_page = None  # [ZOOM-DEBOUNCE]
 
     def _load_rows(self):
         if not self.pdf_path:
@@ -1342,7 +1383,40 @@ class MainWindow(QtWidgets.QMainWindow):
         self._sync_balloon_size_spin(self.default_balloon_radius)
         self._refresh_method_combobox_options()
 
-    def _render_current_page(self):
+    def _maybe_rerender_for_zoom(self, view_scale: float):
+        pdf_view = getattr(self, 'pdf_view', None)
+        if not self.doc or not pdf_view or not pdf_view._pixmap_item:
+            return
+        if view_scale <= 0:
+            return
+        if pdf_view._last_render_scale is None:
+            self._render_current_page(render_scale=view_scale)  # [CRISP-ZOOM]
+            return
+        lo = min(pdf_view._last_render_scale, view_scale)
+        hi = max(pdf_view._last_render_scale, view_scale)
+        if hi / max(lo, 1e-6) >= 1.6:  # [LOD-THRESHOLD]
+            self._render_current_page(render_scale=view_scale)  # [CRISP-ZOOM]
+
+    def _schedule_rerender_for_zoom(self, view_scale: float):
+        """Debounce heavy PDF re-rendering after zoom gestures."""  # [ZOOM-DEBOUNCE]
+        if view_scale <= 0:
+            return
+        pdf_view = getattr(self, 'pdf_view', None)
+        if not self.doc or not pdf_view or not pdf_view._pixmap_item:
+            return
+        self._pending_zoom_scale = view_scale
+        self._zoom_rerender_timer.start(100)
+
+    def _zoom_rerender_timeout(self):
+        if self._pending_zoom_scale is None:
+            return
+        scale = self._pending_zoom_scale
+        self._pending_zoom_scale = None
+        if not self.doc or not getattr(self, 'pdf_view', None):
+            return
+        self._maybe_rerender_for_zoom(scale)
+
+    def _render_current_page(self, render_scale: float | None = None):
         if not self.doc:
             return
         page_count = self.doc.page_count
@@ -1355,12 +1429,69 @@ class MainWindow(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.warning(self, 'Render Failed', f'Unable to load page: {exc}')
             return
 
-        pix = page.get_pixmap(matrix=fitz.Matrix(PAGE_RENDER_ZOOM, PAGE_RENDER_ZOOM))
+        if render_scale is None:
+            self._zoom_rerender_timer.stop()  # [ZOOM-DEBOUNCE]
+            self._pending_zoom_scale = None  # [ZOOM-DEBOUNCE]
+
+        pdf_view = getattr(self, 'pdf_view', None)
+        preserve_center = None
+        if pdf_view and pdf_view._pixmap_item and render_scale is not None:
+            preserve_center = pdf_view.mapToScene(pdf_view.viewport().rect().center())
+
+        try:
+            dpr = float(self.devicePixelRatioF()) if hasattr(self, 'devicePixelRatioF') else 1.0
+        except Exception:
+            dpr = 1.0
+        base_scale = float(PAGE_RENDER_ZOOM)
+        view_scale = float(render_scale or 1.0)
+        max_render_factor = 3.0  # [LOD-THRESHOLD]
+        effective_view_scale = min(view_scale, max_render_factor)  # [LOD-THRESHOLD]
+        matrix_scale = base_scale * effective_view_scale * dpr
+        pix = page.get_pixmap(matrix=fitz.Matrix(matrix_scale, matrix_scale))
         qimage = QtGui.QImage.fromData(pix.tobytes('png'), 'PNG')
-        self.pdf_view.load_page(qimage)
-        self.pdf_view.fit_to_view()
-        self._rebuild_balloons()
-        self._sync_page_spin()
+        try:
+            qimage.setDevicePixelRatio(dpr)  # [CRISP-ZOOM]
+        except Exception:
+            pass
+
+        page_rect = page.rect
+        scene_width = float(page_rect.width) * float(PAGE_RENDER_ZOOM)
+        scene_height = float(page_rect.height) * float(PAGE_RENDER_ZOOM)
+
+        if pdf_view:
+            pdf_view.load_page(qimage, (scene_width, scene_height))
+            if preserve_center is not None:
+                pdf_view.centerOn(preserve_center)
+            pdf_view._current_scale = pdf_view.transform().m11()
+            pdf_view._last_render_scale = pdf_view._current_scale  # [CRISP-ZOOM]
+
+        if self._balloons_built_for_page != self.current_page:
+            self._rebuild_balloons()  # [ZOOM-DEBOUNCE]
+            self._balloons_built_for_page = self.current_page
+        self._apply_balloon_selection_visuals()
+
+        if self.selected_feature_id:
+            feature = next((r for r in self.rows if r.get('id') == self.selected_feature_id), None)
+            if feature:
+                try:
+                    x = float(feature.get('x', 0))
+                    y = float(feature.get('y', 0))
+                    w = float(feature.get('w', 0))
+                    h = float(feature.get('h', 0))
+                except Exception:
+                    feature = None
+                if feature:
+                    rect_item = self._ensure_highlight_rect()
+                    if rect_item is not None:
+                        rect_item.setRect(QtCore.QRectF(x, y, w, h))
+                        rect_item.setVisible(True)
+            else:
+                self._clear_highlight_rect()
+        else:
+            self._clear_highlight_rect()
+
+        if render_scale is None:
+            self._sync_page_spin()
 
     def _rebuild_balloons(self):
         self._clear_balloon_items()
@@ -1379,6 +1510,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.pdf_view.scene().addItem(item)
             self.balloon_items.append(item)
         self._update_balloon_visibility()
+        self._balloons_built_for_page = self.current_page  # [ZOOM-DEBOUNCE]
 
     def _clear_balloon_items(self):
         for item in self.balloon_items:
@@ -1811,10 +1943,12 @@ class MainWindow(QtWidgets.QMainWindow):
         target = max(0, min(value - 1, max(0, self.doc.page_count - 1)))
         if target == self.current_page:
             return
+        self._balloons_built_for_page = None  # [ZOOM-DEBOUNCE]
         self.current_page = target
         self._render_current_page()
         self._apply_balloon_selection_visuals()
         self._clear_highlight_rect()
+        self.fit_view()
 
     def _sync_page_spin(self):
         if self.page_spin is None:
