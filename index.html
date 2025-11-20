@@ -542,4 +542,466 @@
       align-items: center;
       justify-content: center;
       font-size: 14px;
-      margin-bottom: 8px
+      margin-bottom: 8px;
+    }
+
+    .feature-title {
+      font-size: 14px;
+      margin-bottom: 4px;
+      font-weight: 600;
+    }
+
+    .feature-body {
+      font-size: 12px;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+
+    .feature-tags {
+      margin-top: 7px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .tag {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.16em;
+      padding: 3px 7px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.06);
+      color: #b4bad0;
+    }
+
+    .workflow {
+      display: grid;
+      grid-template-columns: minmax(0, 1.4fr) minmax(0, 2fr);
+      gap: 18px;
+      align-items: flex-start;
+    }
+
+    @media (max-width: 880px) {
+      .workflow {
+        grid-template-columns: minmax(0,1fr);
+      }
+    }
+
+    .steps {
+      border-radius: var(--radius-lg);
+      border: 1px solid var(--border-subtle);
+      background: rgba(9,11,18,0.95);
+      padding: 12px;
+    }
+
+    .step {
+      display: grid;
+      grid-template-columns: 26px minmax(0,1fr);
+      gap: 8px;
+      padding: 6px 0;
+      border-bottom: 1px dashed rgba(255,255,255,0.06);
+    }
+
+    .step:last-child {
+      border-bottom: none;
+    }
+
+    .step-number {
+      width: 22px;
+      height: 22px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.15);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    .step-text-title {
+      font-size: 13px;
+      margin-bottom: 2px;
+    }
+
+    .step-text-body {
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .notes-panel {
+      border-radius: var(--radius-lg);
+      border: 1px dashed rgba(255,255,255,0.12);
+      background: rgba(9,11,18,0.8);
+      padding: 10px 12px;
+      font-size: 12px;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+
+    .notes-panel strong {
+      color: var(--text-main);
+    }
+
+    footer {
+      border-top: 1px solid rgba(255,255,255,0.06);
+      margin-top: 28px;
+      padding-top: 16px;
+      font-size: 11px;
+      color: var(--text-muted);
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .footer-right {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .footer-pill {
+      padding: 3px 9px;
+      border-radius: 999px;
+      border: 1px solid var(--border-subtle);
+      background: rgba(12,14,20,0.9);
+      text-transform: uppercase;
+      letter-spacing: 0.16em;
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <header>
+      <div class="logo-wrap">
+        <div class="logo-mark"><span>A</span></div>
+        <div>
+          <div class="logo-text-main">Axis</div>
+          <div class="logo-text-sub">Ballooning & Inspection</div>
+        </div>
+      </div>
+      <div class="header-actions">
+        <div class="pill">Desktop • PyQt • PyMuPDF</div>
+        <button class="btn-primary">
+          <span>⭳</span>
+          <span>Export-Ready Inspection</span>
+        </button>
+      </div>
+    </header>
+
+    <section class="hero">
+      <div>
+        <div class="hero-main-title">
+          Bring order to ballooned prints and inspection data with <span>Axis</span>.
+        </div>
+        <p class="hero-subtitle">
+          Axis is a desktop tool that links your ballooned drawings to inspection results.
+          Pick-on-print, inspect by work order, and export clean PDFs—without losing track
+          of a single feature.
+        </p>
+
+        <div class="hero-metrics">
+          <div class="metric">
+            <div class="metric-label">Modes</div>
+            <div class="metric-value">Ballooning · Inspection</div>
+          </div>
+          <div class="metric">
+            <div class="metric-label">Status logic</div>
+            <div class="metric-value pass">Numeric &bull; PASS/FAIL</div>
+          </div>
+          <div class="metric">
+            <div class="metric-label">Export</div>
+            <div class="metric-value">Ballooned + Report</div>
+          </div>
+        </div>
+
+        <div class="hero-shortcuts">
+          Keyboard shortcuts:
+          <span class="shortcut-key">P</span> Pick-on-Print
+          <span class="shortcut-key">G</span> Grab / Pan
+          <span class="shortcut-key">Ctrl&nbsp;+&nbsp;Z</span> Undo balloon actions
+        </div>
+      </div>
+
+      <aside class="hero-panel" aria-label="Axis interface preview">
+        <div class="hero-panel-header">
+          <div class="badge-mode">
+            <span class="dot"></span>
+            Ballooning Mode
+          </div>
+          <div class="hero-panel-title">PDF + Results side by side</div>
+        </div>
+
+        <div class="hero-panel-body">
+          <div class="pdf-preview">
+            <div class="pdf-sheet">
+              <div class="pdf-title">AXIS-001</div>
+              <div class="pdf-sub">Aerospace Bracket · Rev C</div>
+              <div class="pdf-drawing">
+                <div class="pdf-rect main"></div>
+                <div class="pdf-rect small"></div>
+                <div class="pdf-rect small2"></div>
+                <div class="balloon b1">12</div>
+                <div class="balloon b2">7</div>
+                <div class="balloon b3">3</div>
+              </div>
+            </div>
+          </div>
+          <div class="hero-table">
+            <div class="hero-table-header">
+              <div>ID</div>
+              <div>Page</div>
+              <div>Method</div>
+              <div>Result</div>
+              <div>Status</div>
+            </div>
+            <div class="hero-table-row">
+              <div>F-03</div>
+              <div>1</div>
+              <div>Pin Gage</div>
+              <div>Ø6.00</div>
+              <div><span class="status-pill pass">PASS</span></div>
+            </div>
+            <div class="hero-table-row">
+              <div>F-07</div>
+              <div>1</div>
+              <div>CMM</div>
+              <div>5.983</div>
+              <div><span class="status-pill pass">PASS</span></div>
+            </div>
+            <div class="hero-table-row">
+              <div>F-12</div>
+              <div>2</div>
+              <div>Visual</div>
+              <div>Scratch</div>
+              <div><span class="status-pill fail">FAIL</span></div>
+            </div>
+            <div class="hero-table-row">
+              <div>F-15</div>
+              <div>2</div>
+              <div>—</div>
+              <div>—</div>
+              <div><span class="status-pill na">—</span></div>
+            </div>
+          </div>
+        </div>
+      </aside>
+    </section>
+
+    <section class="section">
+      <div class="section-title">
+        <span class="dot"></span>
+        Core features
+      </div>
+      <p class="section-subtitle">
+        Axis combines balloon creation, method assignment, and inspection entry in one UI.
+        It’s built for inspectors and programmers who live in PDFs, spreadsheets, and work orders—
+        but want them all to stay in sync.
+      </p>
+
+      <div class="feature-grid">
+        <article class="feature-card">
+          <div class="feature-icon">🎈</div>
+          <div class="feature-title">Pick-on-Print Ballooning</div>
+          <div class="feature-body">
+            Draw a rectangle on the PDF and Axis creates a new feature with coordinates,
+            page, and a balloon positioned relative to the picked area.
+          </div>
+          <div class="feature-tags">
+            <span class="tag">Pick Mode</span>
+            <span class="tag">Per-feature zoom</span>
+          </div>
+        </article>
+
+        <article class="feature-card">
+          <div class="feature-icon">📋</div>
+          <div class="feature-title">Inspection Sessions by Work Order</div>
+          <div class="feature-body">
+            Start an Inspection session by serial or work order, keep Ballooning separate,
+            and reload previous sessions without reopening the PDF.
+          </div>
+          <div class="feature-tags">
+            <span class="tag">WO / Serial</span>
+            <span class="tag">History</span>
+          </div>
+        </article>
+
+        <article class="feature-card">
+          <div class="feature-icon">🔍</div>
+          <div class="feature-title">Crisp Zoom with Smart Re-render</div>
+          <div class="feature-body">
+            Zoom and pan fluidly. Axis re-renders the PDF only when the zoom level changes
+            enough to matter, keeping lines sharp without burning CPU.
+          </div>
+          <div class="feature-tags">
+            <span class="tag">LOD-aware</span>
+            <span class="tag">Debounced</span>
+          </div>
+        </article>
+
+        <article class="feature-card">
+          <div class="feature-icon">🧮</div>
+          <div class="feature-title">Tolerance Parsing & Autofill</div>
+          <div class="feature-body">
+            Type a tolerance expression once (e.g. nominal ±) and Axis parses it into nominal,
+            LSL, and USL, formatting the values and updating the master automatically.
+          </div>
+          <div class="feature-tags">
+            <span class="tag">Auto Nom/LSL/USL</span>
+            <span class="tag">Parsing</span>
+          </div>
+        </article>
+
+        <article class="feature-card">
+          <div class="feature-icon">🧪</div>
+          <div class="feature-title">Method Library & Filters</div>
+          <div class="feature-body">
+            Manage a list of inspection methods, edit them in a dedicated dialog,
+            and filter the table by method or PASS/FAIL to focus on what matters.
+          </div>
+          <div class="feature-tags">
+            <span class="tag">Method list</span>
+            <span class="tag">Quick filters</span>
+          </div>
+        </article>
+
+        <article class="feature-card">
+          <div class="feature-icon">📑</div>
+          <div class="feature-title">Export: Ballooned & Inspection PDFs</div>
+          <div class="feature-body">
+            Generate a ballooned drawing PDF and a formatted inspection report,
+            with status coloring and work-order info in the header.
+          </div>
+          <div class="feature-tags">
+            <span class="tag">Report</span>
+            <span class="tag">Balloon overlay</span>
+          </div>
+        </article>
+
+        <article class="feature-card">
+          <div class="feature-icon">↩️</div>
+          <div class="feature-title">Undo for Ballooning Actions</div>
+          <div class="feature-body">
+            Remove accidental balloons with a dedicated Undo stack that tracks
+            additions and deletions, restoring feature rows and graphics.
+          </div>
+          <div class="feature-tags">
+            <span class="tag">Undo stack</span>
+            <span class="tag">Safe edits</span>
+          </div>
+        </article>
+
+        <article class="feature-card">
+          <div class="feature-icon">📏</div>
+          <div class="feature-title">Global & Per-Feature Balloon Size</div>
+          <div class="feature-body">
+            Control balloon radius with a toolbar spinbox. Axis updates existing
+            balloons and uses stored per-feature sizes when present.
+          </div>
+          <div class="feature-tags">
+            <span class="tag">Consistent look</span>
+            <span class="tag">Per-feature radius</span>
+          </div>
+        </article>
+
+        <article class="feature-card">
+          <div class="feature-icon">✅</div>
+          <div class="feature-title">Smart PASS / FAIL Evaluation</div>
+          <div class="feature-body">
+            Axis accepts PASS/FAIL text or numeric measurements and evaluates each
+            row against LSL/USL limits, applying color-coded status cells.
+          </div>
+          <div class="feature-tags">
+            <span class="tag">Numeric logic</span>
+            <span class="tag">Status color</span>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-title">
+        <span class="dot"></span>
+        Typical workflow
+      </div>
+      <p class="section-subtitle">
+        Axis is designed around the way inspectors actually work: start from the drawing,
+        create balloons once, then reuse that setup every time a new work order hits the floor.
+      </p>
+
+      <div class="workflow">
+        <div class="steps">
+          <div class="step">
+            <div class="step-number">1</div>
+            <div>
+              <div class="step-text-title">Open the PDF &amp; prepare the master</div>
+              <div class="step-text-body">
+                Load a drawing PDF. Axis ensures a master data file exists for that print
+                and initializes default fields for each feature.
+              </div>
+            </div>
+          </div>
+          <div class="step">
+            <div class="step-number">2</div>
+            <div>
+              <div class="step-text-title">Balloon using pick-on-print</div>
+              <div class="step-text-body">
+                Enter Ballooning mode and drag rectangles over dimensions. Axis records page,
+                coordinates, zoom level, and balloon offsets automatically.
+              </div>
+            </div>
+          </div>
+          <div class="step">
+            <div class="step-number">3</div>
+            <div>
+              <div class="step-text-title">Define methods &amp; tolerances</div>
+              <div class="step-text-body">
+                Assign inspection methods through comboboxes, or open the Methods dialog
+                to edit the library. Use tolerance parsing to populate Nom/LSL/USL quickly.
+              </div>
+            </div>
+          </div>
+          <div class="step">
+            <div class="step-number">4</div>
+            <div>
+              <div class="step-text-title">Switch to Inspection for each WO</div>
+              <div class="step-text-body">
+                Start an Inspection session with a serial or work order.
+                Result cells become live data entry for that specific build.
+              </div>
+            </div>
+          </div>
+          <div class="step">
+            <div class="step-number">5</div>
+            <div>
+              <div class="step-text-title">Review &amp; export PDFs</div>
+              <div class="step-text-body">
+                Filter by method or status, verify PASS/FAIL, then export a ballooned PDF
+                and an inspection report PDF for your traveler or quality records.
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <aside class="notes-panel">
+          <strong>Implementation highlights</strong><br />
+          • Built on <strong>PyQt6</strong> with a custom <code>QGraphicsView</code> for pick-on-print and zoom.<br />
+          • Uses <strong>PyMuPDF</strong> to render PDFs and draw balloon overlays for the exported prints.<br />
+          • Master data is persisted per PDF, with work-order specific result files layered on top.<br />
+          • Zoom re-rendering is debounced and level-of-detail aware to keep navigation responsive.<br />
+          • An Undo stack protects balloon edits, making most layout changes reversible in Ballooning mode.
+        </aside>
+      </div>
+    </section>
+
+    <footer>
+      <div>Axis · Ballooning &amp; Inspection companion for PDF drawings.</div>
+      <div class="footer-right">
+        <div class="footer-pill">Pick-on-print</div>
+        <div class="footer-pill">Method-aware</div>
+        <div class="footer-pill">Export-focused</div>
+      </div>
+    </footer>
+  </div>
+</body>
+</html>
