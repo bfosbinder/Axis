@@ -1,137 +1,545 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Axis — Blueprint Inspection</title>
-  <meta name="description" content="Axis is a blueprint-aware inspection app with pick-on-print, OCR, default tolerances, CSV sidecars, and dual-screen viewing." />
-
-  <!-- Social / Open Graph -->
-  <meta property="og:title" content="Axis — Blueprint Inspection" />
-  <meta property="og:description" content="Create and execute inspection plans directly on your prints. Pick features, auto-fill tolerances, OCR callouts, and export results—without leaving the blueprint." />
-  <meta property="og:image" content="https://bfosbinder.github.io/Axis/axis-preview.png" />
-  <meta property="og:url" content="https://bfosbinder.github.io/Axis/" />
-  <meta name="twitter:card" content="summary_large_image" />
-
-  <!-- Favicon -->
-  <link rel="icon" href="favicon.ico" type="image/x-icon" />
-  <link rel="apple-touch-icon" href="axis-logo.png" />
-
-  <!-- Fonts & Tailwind -->
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
-  <script src="https://cdn.tailwindcss.com"></script>
+  <meta charset="UTF-8" />
+  <title>Axis – Ballooning & Inspection App</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
-    :root { --axis-accent:#2563EB }
-    body { font-family:Inter,system-ui,Arial }
-    .container { max-width: 1150px }
-    .glass { background:rgba(255,255,255,.06); backdrop-filter: blur(8px) }
-    .badge { background: rgba(37,99,235,.1); color: var(--axis-accent) }
-  </style>
-</head>
-<body class="bg-white text-slate-900 antialiased">
+    :root {
+      --bg: #05060a;
+      --bg-elevated: #0f1117;
+      --accent: #3f8cff;
+      --accent-soft: rgba(63,140,255,0.12);
+      --accent-strong: rgba(63,140,255,0.24);
+      --accent-alt: #ff4f6a;
+      --text-main: #f3f4f7;
+      --text-muted: #9ea3b4;
+      --border-subtle: #222633;
+      --pass: #6bbf7a;
+      --fail: #e16a6a;
+      --radius-lg: 16px;
+      --radius-xl: 22px;
+      --shadow-soft: 0 18px 45px rgba(0,0,0,0.55);
+    }
 
-<!-- HERO -->
-<header class="relative">
-  <div class="absolute inset-0 bg-[#0B1020] -z-10"></div>
+    * {
+      box-sizing: border-box;
+    }
 
-  <!-- Logo in top-right corner -->
-  <div class="absolute top-6 right-6">
-    <img src="axis-logo.png" alt="Axis Logo" class="w-12 h-12 md:w-106 md:h-106 rounded-md shadow-lg border border-white/10" />
-  </div>
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: radial-gradient(circle at top, #141724 0, #05060a 55%);
+      color: var(--text-main);
+      -webkit-font-smoothing: antialiased;
+    }
 
-  <div class="container mx-auto px-6 py-20 md:py-28 text-white">
-    <div class="max-w-3xl">
-      <div class="inline-flex items-center gap-2 badge px-3 py-1 rounded-full text-sm">Blueprint-aware QC</div>
-      <h1 class="text-5xl md:text-6xl font-extrabold mt-4 flex items-center gap-3">
-        Axis
-      </h1>
-      <p class="mt-4 text-lg md:text-xl text-slate-200">
-        Create and execute inspection plans directly on your prints. Pick features, auto-balloon, OCR callouts, and export results—without leaving the blueprint.
-      </p>
-      <div class="mt-8 flex flex-wrap gap-3">
-        <a href="#download" class="px-6 py-3 rounded-xl bg-[var(--axis-accent)] text-white font-semibold hover:opacity-90">Download</a>
-        <a href="https://github.com/bfosbinder/Axis" class="px-6 py-3 rounded-xl border border-white/20 glass hover:bg-white/10">View on GitHub</a>
-      </div>
-      <div class="mt-4 text-sm text-slate-300">Portable CSV sidecars • Works with PDFs/JPGs • Optional OCR</div>
-    </div>
-  </div>
-</header>
-  <!-- FEATURES -->
-  <section id="features" class="container mx-auto px-6 py-16">
-    <h2 class="text-3xl md:text-4xl font-extrabold">Features</h2>
-    <div class="grid md:grid-cols-3 gap-6 mt-8">
-      <div class="p-5 border rounded-2xl hover:shadow-sm">
-        <h3 class="font-semibold">Pick-on-Print</h3>
-        <p class="text-sm text-slate-600 mt-1">Select features directly on the blueprint. Clean, numbered balloons that persist.</p>
-      </div>
-      <div class="p-5 border rounded-2xl hover:shadow-sm">
-        <h3 class="font-semibold">Smart Tolerances</h3>
-        <p class="text-sm text-slate-600 mt-1">Auto-parse ± and +a−b. Bare numbers use editable default block tolerances by decimals.</p>
-      </div>
-      <div class="p-5 border rounded-2xl hover:shadow-sm">
-        <h3 class="font-semibold">OCR Assist</h3>
-        <p class="text-sm text-slate-600 mt-1">Native PDF text when available, otherwise Tesseract with OpenCV pre-processing.</p>
-      </div>
-      <div class="p-5 border rounded-2xl hover:shadow-sm">
-        <h3 class="font-semibold">Dual-Screen Viewer</h3>
-        <p class="text-sm text-slate-600 mt-1">Pop out the print to a separate window for two-monitor workflows.</p>
-      </div>
-      <div class="p-5 border rounded-2xl hover:shadow-sm">
-        <h3 class="font-semibold">CSV Sidecars</h3>
-        <p class="text-sm text-slate-600 mt-1">No database required. Files live with the blueprint and export cleanly.</p>
-      </div>
-      <div class="p-5 border rounded-2xl hover:shadow-sm">
-        <h3 class="font-semibold">SPC (Coming Soon)</h3>
-        <p class="text-sm text-slate-600 mt-1">Historical series and XmR capability from your results CSVs.</p>
-      </div>
-    </div>
-  </section>
+    a {
+      color: inherit;
+      text-decoration: none;
+    }
 
-  <!-- DOWNLOAD -->
-  <section id="download" class="container mx-auto px-6 py-16">
-    <div class="p-8 md:p-10 border rounded-3xl">
-      <div class="grid md:grid-cols-2 gap-8 items-center">
-        <div>
-          <h2 class="text-2xl md:text-3xl font-extrabold">Get Axis for Windows</h2>
-          <p class="text-slate-700 mt-2">Built with PyInstaller. Portable, no Python required.</p>
-          <ul class="list-disc pl-5 text-slate-700 mt-3 space-y-1 text-sm">
-            <li><a class="underline text-[var(--axis-accent)]" href="https://github.com/bfosbinder/Axis/releases">Download from GitHub Releases</a></li>
-            <li>ONEDIR build; OneFile optional</li>
-            <li>Optional: bundle Tesseract & tessdata</li>
-          </ul>
-          <div class="mt-4 flex gap-3">
-            <a class="px-5 py-3 rounded-xl bg-[var(--axis-accent)] text-white font-semibold" href="https://github.com/bfosbinder/Axis/releases">Download</a>
-            <a class="px-5 py-3 rounded-xl border" href="https://github.com/bfosbinder/Axis">GitHub</a>
-          </div>
-        </div>
-        <div class="rounded-2xl bg-slate-50 border p-5">
-          <h3 class="font-semibold">Specs</h3>
-          <div class="grid grid-cols-2 gap-3 text-sm mt-2">
-            <div><span class="text-slate-500">OS:</span> Windows 10/11</div>
-            <div><span class="text-slate-500">PDF:</span> PyMuPDF</div>
-            <div><span class="text-slate-500">UI:</span> PyQt6</div>
-            <div><span class="text-slate-500">OCR:</span> Tesseract (opt.)</div>
-            <div><span class="text-slate-500">Image:</span> OpenCV (opt.)</div>
-            <div><span class="text-slate-500">Storage:</span> CSV sidecars</div>
-          </div>
-        </div>
-      </div>
-    </div>
-  </section>
+    .page {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 32px 16px 48px;
+    }
 
-  <!-- FOOTER -->
-  <footer class="py-10 border-t">
-    <div class="container mx-auto px-6 flex flex-col md:flex-row items-center justify-between gap-4 text-sm text-slate-600">
-      <div>© <span id="y"></span> Axis. Built by <a href="https://github.com/bfosbinder" class="underline">bfosbinder</a></div>
-      <div class="flex gap-4">
-        <a href="#features" class="hover:underline">Features</a>
-        <a href="#download" class="hover:underline">Download</a>
-        <a href="https://github.com/bfosbinder/Axis" class="hover:underline">GitHub</a>
-      </div>
-    </div>
-  </footer>
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 40px;
+      gap: 16px;
+    }
 
-  <script>document.getElementById('y').textContent=new Date().getFullYear()</script>
-</body>
-</html>
+    .logo-wrap {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .logo-mark {
+      width: 34px;
+      height: 34px;
+      border-radius: 999px;
+      background: radial-gradient(circle at 20% 20%, #fff 0, #3f8cff 38%, #05060a 86%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 0 0 1px rgba(255,255,255,0.06), 0 12px 32px rgba(0,0,0,0.7);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .logo-mark::after {
+      content: "";
+      position: absolute;
+      inset: 1px;
+      border-radius: inherit;
+      border: 1px solid rgba(255,255,255,0.35);
+      mix-blend-mode: screen;
+      opacity: 0.55;
+    }
+
+    .logo-mark span {
+      font-weight: 700;
+      font-size: 18px;
+      letter-spacing: 0.08em;
+      color: #05060a;
+      position: relative;
+      z-index: 1;
+    }
+
+    .logo-text-main {
+      font-weight: 650;
+      font-size: 20px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .logo-text-sub {
+      font-size: 11px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .pill {
+      padding: 5px 11px;
+      border-radius: 999px;
+      border: 1px solid var(--border-subtle);
+      font-size: 11px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      background: rgba(255,255,255,0.01);
+    }
+
+    .btn-primary {
+      border-radius: 999px;
+      padding: 9px 18px;
+      border: none;
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      cursor: pointer;
+      color: #05060a;
+      background: linear-gradient(135deg, #3f8cff, #7e5dff);
+      box-shadow: 0 12px 30px rgba(0,0,0,0.65);
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .btn-primary span {
+      font-size: 15px;
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, 3fr) minmax(0, 2.5fr);
+      gap: 32px;
+      align-items: stretch;
+      margin-bottom: 40px;
+    }
+
+    @media (max-width: 880px) {
+      .hero {
+        grid-template-columns: minmax(0, 1fr);
+      }
+    }
+
+    .hero-main-title {
+      font-size: 32px;
+      line-height: 1.15;
+      font-weight: 700;
+      letter-spacing: 0.01em;
+      margin-bottom: 12px;
+    }
+
+    .hero-main-title span {
+      background: linear-gradient(120deg, #3f8cff, #ff4f6a);
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+    }
+
+    .hero-subtitle {
+      color: var(--text-muted);
+      font-size: 14px;
+      line-height: 1.5;
+      max-width: 440px;
+      margin-bottom: 20px;
+    }
+
+    .hero-metrics {
+      display: flex;
+      gap: 18px;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+    }
+
+    .metric {
+      padding: 10px 14px;
+      border-radius: 14px;
+      border: 1px solid var(--border-subtle);
+      background: rgba(9,11,18,0.9);
+      min-width: 110px;
+    }
+
+    .metric-label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.16em;
+      color: var(--text-muted);
+      margin-bottom: 3px;
+    }
+
+    .metric-value {
+      font-size: 18px;
+      font-weight: 600;
+    }
+
+    .metric-value.pass {
+      color: var(--pass);
+    }
+
+    .metric-value.fail {
+      color: var(--fail);
+    }
+
+    .hero-shortcuts {
+      font-size: 11px;
+      color: var(--text-muted);
+      line-height: 1.6;
+    }
+
+    .shortcut-key {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0 6px;
+      height: 18px;
+      border-radius: 6px;
+      border: 1px solid var(--border-subtle);
+      background: rgba(15,17,23,0.9);
+      font-size: 10px;
+      margin: 0 3px;
+    }
+
+    .hero-panel {
+      background: radial-gradient(circle at top left, rgba(63,140,255,0.18) 0, rgba(5,6,10,0.9) 72%);
+      border-radius: var(--radius-xl);
+      border: 1px solid rgba(255,255,255,0.06);
+      box-shadow: var(--shadow-soft);
+      padding: 18px 18px 16px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .hero-panel-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+      gap: 12px;
+    }
+
+    .badge-mode {
+      padding: 4px 9px;
+      border-radius: 999px;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.16em;
+      background: var(--accent-soft);
+      border: 1px solid var(--accent-strong);
+      color: #e2e6ff;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .badge-mode span.dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: radial-gradient(circle at 30% 30%, #fff 0, #3f8cff 50%, #101520 100%);
+      box-shadow: 0 0 6px rgba(63,140,255,0.9);
+    }
+
+    .hero-panel-title {
+      font-size: 13px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.16em;
+    }
+
+    .hero-panel-body {
+      border-radius: 14px;
+      background: rgba(7,9,15,0.95);
+      border: 1px solid rgba(255,255,255,0.06);
+      padding: 12px 12px 10px;
+      display: grid;
+      grid-template-columns: 1.2fr 1fr;
+      gap: 14px;
+    }
+
+    @media (max-width: 520px) {
+      .hero-panel-body {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .pdf-preview {
+      border-radius: 12px;
+      background:
+        radial-gradient(circle at 0 0, rgba(63,140,255,0.1) 0, transparent 50%),
+        linear-gradient(135deg, #0d0f17, #05060a);
+      border: 1px solid rgba(255,255,255,0.05);
+      padding: 10px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .pdf-sheet {
+      background: #f8f9fb;
+      border-radius: 8px;
+      position: relative;
+      height: 172px;
+      padding: 10px 8px;
+      color: #151824;
+      font-size: 11px;
+      box-shadow:
+        0 10px 25px rgba(0,0,0,0.4),
+        0 0 0 1px rgba(0,0,0,0.12);
+    }
+
+    .pdf-title {
+      font-weight: 600;
+      margin-bottom: 2px;
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.14em;
+    }
+
+    .pdf-sub {
+      font-size: 9px;
+      color: #6c7284;
+      margin-bottom: 8px;
+    }
+
+    .pdf-drawing {
+      border-radius: 7px;
+      border: 1px solid #d4d7e2;
+      padding: 4px;
+      position: relative;
+      height: 110px;
+      overflow: hidden;
+    }
+
+    .pdf-rect {
+      position: absolute;
+      border-radius: 2px;
+      border: 1px solid #c3c7d7;
+      background: #fdfefe;
+    }
+
+    .pdf-rect.main {
+      inset: 6px 6px 34px 30px;
+    }
+
+    .pdf-rect.small {
+      width: 48px;
+      height: 14px;
+      bottom: 10px;
+      left: 8px;
+    }
+
+    .pdf-rect.small2 {
+      width: 36px;
+      height: 10px;
+      bottom: 10px;
+      right: 10px;
+    }
+
+    .balloon {
+      position: absolute;
+      width: 30px;
+      height: 30px;
+      border-radius: 999px;
+      background: #ffe6e6;
+      border: 2px solid #e32828;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 12px;
+      color: #b11818;
+      box-shadow: 0 0 0 1px rgba(252, 160, 160, 0.9);
+    }
+
+    .balloon.b1 {
+      top: 10px;
+      right: 18px;
+    }
+
+    .balloon.b2 {
+      bottom: 40px;
+      right: 26px;
+      width: 26px;
+      height: 26px;
+      font-size: 11px;
+    }
+
+    .balloon.b3 {
+      top: 40px;
+      left: 34px;
+      width: 24px;
+      height: 24px;
+      font-size: 10px;
+    }
+
+    .hero-table {
+      border-radius: 11px;
+      background: rgba(5,6,10,0.96);
+      border: 1px solid rgba(255,255,255,0.06);
+      padding: 8px 10px;
+      font-size: 11px;
+    }
+
+    .hero-table-header {
+      display: grid;
+      grid-template-columns: 1.1fr 0.6fr 1fr 0.8fr 0.7fr;
+      gap: 6px;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+      padding-bottom: 6px;
+      margin-bottom: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      color: var(--text-muted);
+    }
+
+    .hero-table-row {
+      display: grid;
+      grid-template-columns: 1.1fr 0.6fr 1fr 0.8fr 0.7fr;
+      gap: 6px;
+      padding: 4px 0;
+      align-items: center;
+    }
+
+    .status-pill {
+      border-radius: 999px;
+      font-size: 10px;
+      padding: 3px 8px;
+      text-transform: uppercase;
+      letter-spacing: 0.14em;
+      display: inline-flex;
+      justify-content: center;
+      align-items: center;
+    }
+
+    .status-pill.pass {
+      background: rgba(107,191,122,0.12);
+      border: 1px solid rgba(107,191,122,0.7);
+      color: #b5f5c0;
+    }
+
+    .status-pill.fail {
+      background: rgba(225,106,106,0.12);
+      border: 1px solid rgba(225,106,106,0.7);
+      color: #ffd3d3;
+    }
+
+    .status-pill.na {
+      background: rgba(158,163,180,0.12);
+      border: 1px solid rgba(158,163,180,0.6);
+      color: #cdd1e0;
+    }
+
+    .section {
+      margin-bottom: 32px;
+    }
+
+    .section-title {
+      font-size: 18px;
+      margin-bottom: 6px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .section-title span.dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 999px;
+      background: var(--accent);
+    }
+
+    .section-subtitle {
+      font-size: 13px;
+      color: var(--text-muted);
+      max-width: 640px;
+      line-height: 1.5;
+      margin-bottom: 18px;
+    }
+
+    .feature-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    @media (max-width: 880px) {
+      .feature-grid {
+        grid-template-columns: repeat(2, minmax(0,1fr));
+      }
+    }
+    @media (max-width: 640px) {
+      .feature-grid {
+        grid-template-columns: minmax(0,1fr);
+      }
+    }
+
+    .feature-card {
+      border-radius: var(--radius-lg);
+      background: linear-gradient(145deg, rgba(15,17,23,0.96), rgba(9,11,18,0.96));
+      border: 1px solid var(--border-subtle);
+      padding: 12px 12px 10px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .feature-card::before {
+      content: "";
+      position: absolute;
+      inset: -40%;
+      background: radial-gradient(circle at 0 0, rgba(63,140,255,0.16), transparent 55%);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.25s ease-out;
+    }
+
+    .feature-card:hover::before {
+      opacity: 1;
+    }
+
+    .feature-icon {
+      width: 24px;
+      height: 24px;
+      border-radius: 10px;
+      background: rgba(63,140,255,0.14);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      margin-bottom: 8px
