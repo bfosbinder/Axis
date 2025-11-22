@@ -1,12 +1,18 @@
 import sys
 import os
 import re
+import io
 from functools import partial
 from pathlib import Path
 from datetime import datetime
 import fitz  # PyMuPDF
 from PyQt6 import QtWidgets, QtGui, QtCore
 from storage import ensure_master, read_master, add_feature, update_feature, delete_feature, read_wo, write_wo, write_master, parse_tolerance_expression, normalize_str, MASTER_HEADER, list_workorders
+
+try:
+    from PIL import Image  # type: ignore
+except ImportError:  # Pillow is optional until OCR runs
+    Image = None
 
 
 BALLOON_RADIUS = 14
@@ -485,7 +491,7 @@ class MainWindow(QtWidgets.QMainWindow):
         toolbar.addWidget(self.show_balloon_btn)
 
         ocr_btn = QtWidgets.QPushButton('OCR')
-        ocr_btn.clicked.connect(lambda: QtWidgets.QMessageBox.information(self, 'OCR', 'OCR is stubbed.'))
+        ocr_btn.clicked.connect(self._run_ocr)
         toolbar.addWidget(ocr_btn)
 
         self.balloon_size_label = QtWidgets.QLabel('Balloon size:')
@@ -1209,6 +1215,83 @@ class MainWindow(QtWidgets.QMainWindow):
             view.setCursor(QtCore.Qt.CursorShape.CrossCursor)
         else:
             view.unsetCursor()
+
+    def _run_ocr(self):
+        if not self.doc:
+            QtWidgets.QMessageBox.information(self, 'OCR', 'Open a PDF before running OCR.')
+            return
+        try:
+            import pytesseract  # type: ignore
+        except ImportError:
+            QtWidgets.QMessageBox.warning(
+                self,
+                'OCR',
+                'pytesseract is not installed. Run "pip install pytesseract" in your environment.'
+            )
+            return
+        if Image is None:
+            QtWidgets.QMessageBox.warning(
+                self,
+                'OCR',
+                'Pillow is required for OCR image conversion. Install it with "pip install Pillow".'
+            )
+            return
+        try:
+            page = self.doc.load_page(self.current_page)
+        except Exception as exc:
+            QtWidgets.QMessageBox.warning(self, 'OCR', f'Unable to load the current page for OCR.\n{exc}')
+            return
+        buffer = None
+        image = None
+        try:
+            matrix = fitz.Matrix(PAGE_RENDER_ZOOM * 2.0, PAGE_RENDER_ZOOM * 2.0)
+            pix = page.get_pixmap(matrix=matrix)
+            buffer = io.BytesIO(pix.tobytes('png'))
+            image = Image.open(buffer)
+        except Exception as exc:
+            if buffer is not None:
+                buffer.close()
+            QtWidgets.QMessageBox.warning(self, 'OCR', f'OCR capture failed.\n{exc}')
+            return
+        try:
+            text = pytesseract.image_to_string(image)
+        except pytesseract.TesseractNotFoundError:
+            QtWidgets.QMessageBox.warning(
+                self,
+                'OCR',
+                'Tesseract executable is not available. Install it and ensure it is on your PATH.'
+            )
+            return
+        except Exception as exc:
+            QtWidgets.QMessageBox.warning(self, 'OCR', f'OCR failed.\n{exc}')
+            return
+        finally:
+            if image is not None:
+                try:
+                    image.close()
+                except Exception:
+                    pass
+            if buffer is not None:
+                buffer.close()
+        text = (text or '').strip()
+        if not text:
+            text = '(No text detected)'
+        self._show_ocr_dialog(text)
+
+    def _show_ocr_dialog(self, text: str):
+        dialog = QtWidgets.QDialog(self)
+        dialog.setWindowTitle('OCR Result')
+        layout = QtWidgets.QVBoxLayout(dialog)
+        output = QtWidgets.QPlainTextEdit()
+        output.setReadOnly(True)
+        output.setPlainText(text)
+        layout.addWidget(output)
+        buttons = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.StandardButton.Close)
+        buttons.rejected.connect(dialog.reject)
+        buttons.accepted.connect(dialog.accept)
+        layout.addWidget(buttons)
+        dialog.resize(640, 480)
+        dialog.exec()
 
     def _update_balloon_visibility(self):
         for item in self.balloon_items:
