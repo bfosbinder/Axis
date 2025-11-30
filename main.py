@@ -8,6 +8,7 @@ from datetime import datetime
 import fitz  # PyMuPDF
 from PyQt6 import QtWidgets, QtGui, QtCore
 from storage import ensure_master, read_master, add_feature, update_feature, delete_feature, read_wo, write_wo, write_master, parse_tolerance_expression, normalize_str, MASTER_HEADER, list_workorders
+import spc
 
 try:
     from PIL import Image  # type: ignore
@@ -30,7 +31,7 @@ def format_number(value: float, decimals: int = 6) -> str:
 
 class StartSessionDialog(QtWidgets.QDialog):
     """Prompt for Serial Number (Inspection) or start Ballooning mode."""
-    def __init__(self, parent=None, previous_orders=None):
+    def __init__(self, parent=None, previous_orders=None, allow_ballooning=True):
         super().__init__(parent)
         self.setWindowTitle('Start Session')
         self.choice = 'cancel'  # 'inspection' | 'ballooning' | 'cancel'
@@ -60,12 +61,14 @@ class StartSessionDialog(QtWidgets.QDialog):
         self.btn_balloon = QtWidgets.QPushButton('Start Ballooning')
         self.btn_cancel = QtWidgets.QPushButton('Cancel')
         btns.addWidget(self.btn_inspect)
-        btns.addWidget(self.btn_balloon)
+        if allow_ballooning:
+            btns.addWidget(self.btn_balloon)
         btns.addWidget(self.btn_cancel)
         lay.addLayout(btns)
 
         self.btn_inspect.clicked.connect(self._go_inspect)
-        self.btn_balloon.clicked.connect(self._go_balloon)
+        if allow_ballooning:
+            self.btn_balloon.clicked.connect(self._go_balloon)
         self.btn_cancel.clicked.connect(self.reject)
 
     def _go_inspect(self):
@@ -298,7 +301,9 @@ class PDFView(QtWidgets.QGraphicsView):
             return
         if self._pixmap_item is not None:
             try:
-                scene.removeItem(self._pixmap_item)
+                current_scene = self._pixmap_item.scene()
+                target_scene = current_scene or scene
+                target_scene.removeItem(self._pixmap_item)
             except Exception:
                 pass
             self._pixmap_item = None
@@ -493,6 +498,10 @@ class MainWindow(QtWidgets.QMainWindow):
         ocr_btn = QtWidgets.QPushButton('OCR')
         ocr_btn.clicked.connect(self._run_ocr)
         toolbar.addWidget(ocr_btn)
+
+        spc_btn = QtWidgets.QPushButton('SPC')
+        spc_btn.clicked.connect(self._open_spc_dashboard)
+        toolbar.addWidget(spc_btn)
 
         self.balloon_size_label = QtWidgets.QLabel('Balloon size:')
         toolbar.addWidget(self.balloon_size_label)
@@ -771,9 +780,17 @@ class MainWindow(QtWidgets.QMainWindow):
             if next_item is not None:
                 table.setCurrentCell(next_row, 3)
 
-                def _start_edit():
+                def _start_edit(target_row=next_row):
+                    table_ref = getattr(self, 'table', None)
+                    if table_ref is None:
+                        return
+                    if target_row < 0 or target_row >= table_ref.rowCount():
+                        return
+                    item_ref = table_ref.item(target_row, 3)
+                    if item_ref is None:
+                        return
                     try:
-                        table.editItem(next_item)
+                        table_ref.editItem(item_ref)
                     except Exception:
                         pass
 
@@ -1293,6 +1310,21 @@ class MainWindow(QtWidgets.QMainWindow):
         dialog.resize(640, 480)
         dialog.exec()
 
+    def _open_spc_dashboard(self):
+        if not self.pdf_path:
+            QtWidgets.QMessageBox.information(self, 'SPC', 'Open a PDF before viewing SPC data.')
+            return
+        try:
+            dataset = spc.load_spc_dataset(self.pdf_path)
+        except Exception as exc:
+            QtWidgets.QMessageBox.warning(self, 'SPC', f'Unable to load SPC data.\n{exc}')
+            return
+        if not dataset:
+            QtWidgets.QMessageBox.information(self, 'SPC', 'No numeric inspection results found for this part.')
+            return
+        dlg = SPCDialog(self, self.pdf_path, dataset)
+        dlg.exec()
+
     def _update_balloon_visibility(self):
         for item in self.balloon_items:
             item.setVisible(self.show_balloons)
@@ -1302,11 +1334,12 @@ class MainWindow(QtWidgets.QMainWindow):
         if not self.pdf_path:
             QtWidgets.QMessageBox.information(self, 'No PDF', 'Open a PDF first.')
             return
-        if self._prompt_session(list_workorders(self.pdf_path)):
+        allow_ballooning = not bool(self.rows)
+        if self._prompt_session(list_workorders(self.pdf_path), allow_ballooning=allow_ballooning):
             self.refresh_table()
 
-    def _prompt_session(self, previous_orders=None) -> bool:
-        dlg = StartSessionDialog(self, previous_orders)
+    def _prompt_session(self, previous_orders=None, allow_ballooning=True) -> bool:
+        dlg = StartSessionDialog(self, previous_orders, allow_ballooning=allow_ballooning)
         if dlg.exec() != QtWidgets.QDialog.DialogCode.Accepted:
             return False
         if dlg.choice == 'ballooning':
@@ -1386,7 +1419,8 @@ class MainWindow(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.warning(self, 'Master Data', f'Could not prepare master data for this PDF.\n{exc}')
 
         self._load_rows()
-        if not self._prompt_session(list_workorders(self.pdf_path)):
+        allow_ballooning = not bool(self.rows)
+        if not self._prompt_session(list_workorders(self.pdf_path), allow_ballooning=allow_ballooning):
             self.mode = 'Ballooning'
             self.current_wo = None
         self._update_mode_ui()
@@ -1421,6 +1455,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.pdf_view._last_render_scale = None  # [CRISP-ZOOM]
         if self.pdf_view.scene():
             self.pdf_view.scene().clear()
+            self.pdf_view._pixmap_item = None
         self.table.setRowCount(0)
         self._update_mode_ui()
         self._update_page_controls_enabled()
@@ -1598,7 +1633,9 @@ class MainWindow(QtWidgets.QMainWindow):
     def _clear_balloon_items(self):
         for item in self.balloon_items:
             try:
-                self.pdf_view.scene().removeItem(item)
+                scene = item.scene()
+                if scene is not None:
+                    scene.removeItem(item)
             except Exception:
                 pass
         self.balloon_items = []
@@ -2170,6 +2207,177 @@ class MainWindow(QtWidgets.QMainWindow):
         self._rebuild_balloons()
         self._apply_balloon_selection_visuals()
         return feature_snapshot
+
+
+class SPCChartWidget(QtWidgets.QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._feature_data: spc.FeatureSPCData | None = None
+        self.setMinimumSize(320, 220)
+
+    def set_feature_data(self, data: spc.FeatureSPCData | None):
+        self._feature_data = data
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QtGui.QPainter(self)
+        painter.fillRect(self.rect(), QtGui.QColor(23, 23, 23))
+        painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing, True)
+        if not self._feature_data or not self._feature_data.measurements:
+            painter.setPen(QtGui.QColor(200, 200, 200))
+            painter.drawText(self.rect(), QtCore.Qt.AlignmentFlag.AlignCenter, 'No data')
+            return
+        rect = QtCore.QRectF(self.rect().adjusted(24, 16, -16, -32))
+        if rect.width() <= 0 or rect.height() <= 0:
+            return
+        values = [m.value for m in self._feature_data.measurements]
+        min_val = min(values)
+        max_val = max(values)
+        if self._feature_data.lsl is not None:
+            min_val = min(min_val, self._feature_data.lsl)
+        if self._feature_data.usl is not None:
+            max_val = max(max_val, self._feature_data.usl)
+        span = max_val - min_val
+        margin = span * 0.1 if span > 1e-6 else 1.0
+        min_val -= margin
+        max_val += margin
+        painter.setPen(QtGui.QPen(QtGui.QColor(120, 120, 120), 1))
+        painter.drawRect(rect)
+        self._draw_spec_line(painter, rect, min_val, max_val, self._feature_data.lsl, QtGui.QColor(255, 140, 140))
+        self._draw_spec_line(painter, rect, min_val, max_val, self._feature_data.usl, QtGui.QColor(140, 200, 255))
+        path = QtGui.QPainterPath()
+        count = len(values)
+        for idx, value in enumerate(values):
+            x_ratio = idx / (count - 1) if count > 1 else 0.0
+            x = rect.left() + x_ratio * rect.width()
+            y = self._value_to_y(rect, min_val, max_val, value)
+            if idx == 0:
+                path.moveTo(x, y)
+            else:
+                path.lineTo(x, y)
+            painter.setBrush(QtGui.QBrush(QtGui.QColor(200, 200, 90)))
+            painter.setPen(QtGui.QPen(QtGui.QColor(200, 200, 90), 2))
+            painter.drawEllipse(QtCore.QPointF(x, y), 3, 3)
+        painter.setPen(QtGui.QPen(QtGui.QColor(160, 220, 255), 2))
+        painter.drawPath(path)
+        painter.setPen(QtGui.QColor(200, 200, 200))
+        painter.drawText(QtCore.QPointF(rect.right() - 90, rect.bottom() + 20), 'Sample #')
+
+    def _value_to_y(self, rect: QtCore.QRectF, min_val: float, max_val: float, value: float) -> float:
+        if max_val - min_val < 1e-6:
+            return rect.center().y()
+        ratio = (value - min_val) / (max_val - min_val)
+        return rect.bottom() - ratio * rect.height()
+
+    def _draw_spec_line(self, painter: QtGui.QPainter, rect: QtCore.QRectF, min_val: float, max_val: float, value: float | None, color: QtGui.QColor):
+        if value is None:
+            return
+        y = self._value_to_y(rect, min_val, max_val, value)
+        painter.setPen(QtGui.QPen(color, 1, QtCore.Qt.PenStyle.DashLine))
+        painter.drawLine(QtCore.QLineF(rect.left(), y, rect.right(), y))
+
+
+class SPCDialog(QtWidgets.QDialog):
+    def __init__(self, parent: QtWidgets.QWidget | None, pdf_path: str, dataset: dict[str, spc.FeatureSPCData]):
+        super().__init__(parent)
+        self.pdf_path = pdf_path
+        self.dataset = dataset
+        self.setWindowTitle('SPC Dashboard')
+        self.resize(1000, 560)
+
+        layout = QtWidgets.QHBoxLayout(self)
+        self.feature_list = QtWidgets.QListWidget()
+        self.feature_list.currentItemChanged.connect(self._selection_changed)
+        layout.addWidget(self.feature_list, 1)
+
+        right_panel = QtWidgets.QVBoxLayout()
+        layout.addLayout(right_panel, 2)
+
+        self.stats_labels: dict[str, QtWidgets.QLabel] = {}
+        stats_form = QtWidgets.QFormLayout()
+        for key, title in (
+            ('count', 'Samples'),
+            ('mean', 'Mean'),
+            ('stdev', 'Std Dev'),
+            ('min', 'Min'),
+            ('max', 'Max'),
+            ('cp', 'Cp'),
+            ('cpk', 'Cpk'),
+        ):
+            lbl = QtWidgets.QLabel('—')
+            self.stats_labels[key] = lbl
+            stats_form.addRow(f'{title}:', lbl)
+        right_panel.addLayout(stats_form)
+
+        self.chart_widget = SPCChartWidget()
+        right_panel.addWidget(self.chart_widget, 1)
+
+        self.measurement_table = QtWidgets.QTableWidget(0, 4)
+        self.measurement_table.setHorizontalHeaderLabels(['Work Order', 'Value', 'Timestamp', 'Source'])
+        header = self.measurement_table.horizontalHeader()
+        header.setSectionResizeMode(0, QtWidgets.QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(1, QtWidgets.QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(2, QtWidgets.QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(3, QtWidgets.QHeaderView.ResizeMode.Stretch)
+        right_panel.addWidget(self.measurement_table, 1)
+
+        self._populate_feature_list()
+
+    def _populate_feature_list(self):
+        self.feature_list.clear()
+        for fid in sorted(self.dataset.keys(), key=lambda s: s.lower()):
+            data = self.dataset[fid]
+            item = QtWidgets.QListWidgetItem(f'{fid} ({len(data.measurements)})')
+            item.setData(QtCore.Qt.ItemDataRole.UserRole, fid)
+            self.feature_list.addItem(item)
+        if self.feature_list.count() > 0:
+            self.feature_list.setCurrentRow(0)
+
+    def _selection_changed(self, current, previous):
+        if current is None:
+            self.chart_widget.set_feature_data(None)
+            self._update_stats(None)
+            self._populate_measurement_table([])
+            return
+        fid = current.data(QtCore.Qt.ItemDataRole.UserRole)
+        data = self.dataset.get(fid)
+        self.chart_widget.set_feature_data(data)
+        self._update_stats(data)
+        measurements = sorted(
+            data.measurements,
+            key=lambda m: (m.timestamp or datetime.min, m.workorder)
+        )
+        self._populate_measurement_table(measurements)
+
+    def _update_stats(self, data: spc.FeatureSPCData | None):
+        if not data:
+            for lbl in self.stats_labels.values():
+                lbl.setText('—')
+            return
+        stats = data.stats
+        self.stats_labels['count'].setText(str(stats.count))
+        self.stats_labels['mean'].setText(spc.format_stat(stats.mean))
+        self.stats_labels['stdev'].setText(spc.format_stat(stats.stdev))
+        self.stats_labels['min'].setText(spc.format_stat(stats.min_value))
+        self.stats_labels['max'].setText(spc.format_stat(stats.max_value))
+        self.stats_labels['cp'].setText(spc.format_stat(stats.cp))
+        self.stats_labels['cpk'].setText(spc.format_stat(stats.cpk))
+
+    def _populate_measurement_table(self, measurements: list[spc.Measurement]):
+        self.measurement_table.setRowCount(len(measurements))
+        for row, measurement in enumerate(measurements):
+            ts_text = measurement.timestamp.strftime('%Y-%m-%d %H:%M') if measurement.timestamp else '—'
+            row_values = (
+                measurement.workorder,
+                f'{measurement.value:.4f}',
+                ts_text,
+                measurement.source_path,
+            )
+            for col, text in enumerate(row_values):
+                item = QtWidgets.QTableWidgetItem(text)
+                item.setFlags(item.flags() & ~QtCore.Qt.ItemFlag.ItemIsEditable)
+                self.measurement_table.setItem(row, col, item)
+
 
 def main():
     app = QtWidgets.QApplication(sys.argv)
