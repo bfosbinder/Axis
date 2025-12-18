@@ -80,15 +80,13 @@ Recommended: 1080p or larger monitor
 
 📁 How Data Is Stored
 
-The app stores metadata alongside your PDF:
+Axis now keeps everything (balloons + inspection results) in a single SQLite file next to your PDF:
 
 yourfile.pdf
 
-yourfile_master.json
+yourfile.axis.db
 
-yourfile_workorders.json
-
-This keeps your balloons + tolerances linked to the original drawing.
+The first time the `.axis.db` file is created, any legacy `*.balloons.csv` and work-order CSV files are imported automatically so existing projects continue to work.
 
 🛠️ How to Use
 1. Open a PDF

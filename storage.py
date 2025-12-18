@@ -1,140 +1,282 @@
 import csv
 import os
 import re
-from typing import List, Dict, Tuple
+import sqlite3
+from contextlib import closing
+from datetime import datetime
+from typing import Dict, List, Tuple
 
 MASTER_HEADER = ["id", "page", "x", "y", "w", "h", "zoom", "method", "nominal", "lsl", "usl", "bx", "by", "br"]
+DB_SUFFIX = ".axis.db"
 
 
-def atomic_write(path: str, rows: List[Dict[str, str]], header: List[str]):
-    tmp = path + ".tmp"
-    with open(tmp, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=header)
-        writer.writeheader()
-        for r in rows:
-            writer.writerow({k: ("" if r.get(k) is None else r.get(k)) for k in header})
-    os.replace(tmp, path)
+def _db_path(pdf_path: str) -> str:
+    return f"{pdf_path}{DB_SUFFIX}"
 
 
 def ensure_master(pdf_path: str) -> str:
-    master = pdf_path + ".balloons.csv"
-    if not os.path.exists(master):
-        atomic_write(master, [], MASTER_HEADER)
-    return master
+    """Ensure the SQLite database exists and is initialized; migrate legacy CSV data when present."""
+    db_path = _db_path(pdf_path)
+    init_needed = not os.path.exists(db_path)
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    try:
+        if init_needed:
+            _initialize_db(conn)
+        _maybe_migrate_from_csv(pdf_path, conn)
+    finally:
+        conn.close()
+    return db_path
+
+
+def _initialize_db(conn: sqlite3.Connection):
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS features (
+            id TEXT PRIMARY KEY,
+            page TEXT,
+            x TEXT,
+            y TEXT,
+            w TEXT,
+            h TEXT,
+            zoom TEXT,
+            method TEXT,
+            nominal TEXT,
+            lsl TEXT,
+            usl TEXT,
+            bx TEXT,
+            by TEXT,
+            br TEXT
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS results (
+            feature_id TEXT NOT NULL,
+            workorder TEXT NOT NULL,
+            result TEXT,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (feature_id, workorder),
+            FOREIGN KEY (feature_id) REFERENCES features(id) ON DELETE CASCADE
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_results_workorder ON results(workorder)")
+    conn.commit()
+
+
+def _connect(pdf_path: str) -> sqlite3.Connection:
+    ensure_master(pdf_path)
+    conn = sqlite3.connect(_db_path(pdf_path))
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    return conn
+
+
+def _maybe_migrate_from_csv(pdf_path: str, conn: sqlite3.Connection):
+    master_csv = f"{pdf_path}.balloons.csv"
+    try:
+        count = conn.execute("SELECT COUNT(*) FROM features").fetchone()[0]
+    except sqlite3.DatabaseError:
+        count = 0
+    if os.path.exists(master_csv) and count == 0:
+        with open(master_csv, newline="", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            rows = list(reader)
+        for row in rows:
+            payload = {key: row.get(key, "") or "" for key in MASTER_HEADER}
+            conn.execute(
+                f"INSERT OR REPLACE INTO features ({', '.join(MASTER_HEADER)}) VALUES ({', '.join('?' for _ in MASTER_HEADER)})",
+                [payload.get(key, "") for key in MASTER_HEADER]
+            )
+        conn.commit()
+
+    # migrate workorder CSVs only once (when DB is still empty)
+    try:
+        result_count = conn.execute("SELECT COUNT(*) FROM results").fetchone()[0]
+    except sqlite3.DatabaseError:
+        result_count = 0
+    if result_count == 0:
+        directory = os.path.dirname(pdf_path) or "."
+        base_name = os.path.basename(pdf_path)
+        prefix = f"{base_name}."
+        try:
+            entries = os.listdir(directory)
+        except FileNotFoundError:
+            entries = []
+        for name in entries:
+            if not name.startswith(prefix) or not name.endswith(".csv"):
+                continue
+            if name == f"{base_name}.balloons.csv":
+                continue
+            workorder = name[len(prefix):-4].replace("_", "/")
+            csv_path = os.path.join(directory, name)
+            with open(csv_path, newline="", encoding="utf-8") as f:
+                reader = csv.DictReader(f)
+                rows = list(reader)
+            timestamp = datetime.fromtimestamp(os.path.getmtime(csv_path)).isoformat()
+            for row in rows:
+                feature_id = row.get("id")
+                result = row.get("result", "")
+                if not feature_id:
+                    continue
+                conn.execute(
+                    """
+                    INSERT INTO results (feature_id, workorder, result, updated_at)
+                    VALUES (?, ?, ?, ?)
+                    ON CONFLICT(feature_id, workorder)
+                    DO UPDATE SET result=excluded.result, updated_at=excluded.updated_at
+                    """,
+                    (feature_id, workorder, result, timestamp)
+                )
+            conn.commit()
 
 
 def read_master(pdf_path: str) -> List[Dict[str, str]]:
-    master = ensure_master(pdf_path)
-    rows = []
-    with open(master, newline="", encoding="utf-8") as f:
-        reader = csv.DictReader(f)
-        for r in reader:
-            rows.append(r)
-    return rows
+    with closing(_connect(pdf_path)) as conn:
+        cur = conn.execute(f"SELECT {', '.join(MASTER_HEADER)} FROM features ORDER BY id COLLATE NOCASE")
+        rows = []
+        for row in cur.fetchall():
+            data = {key: (row[key] if row[key] is not None else "") for key in MASTER_HEADER}
+            rows.append(data)
+        return rows
 
 
 def write_master(pdf_path: str, rows: List[Dict[str, str]]):
-    master = ensure_master(pdf_path)
-    atomic_write(master, rows, MASTER_HEADER)
+    with closing(_connect(pdf_path)) as conn:
+        conn.execute("BEGIN")
+        existing_ids = {r[0] for r in conn.execute("SELECT id FROM features").fetchall()}
+        incoming_ids = set()
+        for row in rows:
+            fid = row.get("id")
+            if not fid:
+                continue
+            incoming_ids.add(fid)
+            payload = {key: (row.get(key, "") or "") for key in MASTER_HEADER}
+            placeholders = ", ".join("?" for _ in MASTER_HEADER)
+            columns = ", ".join(MASTER_HEADER)
+            if fid in existing_ids:
+                assignments = ", ".join(f"{col} = ?" for col in MASTER_HEADER if col != "id")
+                values = [payload[col] for col in MASTER_HEADER if col != "id"] + [fid]
+                conn.execute(f"UPDATE features SET {assignments} WHERE id = ?", values)
+            else:
+                conn.execute(f"INSERT INTO features ({columns}) VALUES ({placeholders})", [payload[key] for key in MASTER_HEADER])
+        removed = existing_ids - incoming_ids
+        if removed:
+            conn.executemany("DELETE FROM features WHERE id = ?", [(fid,) for fid in removed])
+        conn.commit()
 
 
-def next_id(rows: List[Dict[str, str]]) -> str:
+def _next_feature_id(conn: sqlite3.Connection) -> str:
     maxn = 0
-    for r in rows:
-        vid = r.get("id", "")
+    for row in conn.execute("SELECT id FROM features"):
+        vid = row[0] or ""
         m = re.search(r"(\d+)$", vid)
         if m:
-            n = int(m.group(1))
-            if n > maxn:
-                maxn = n
-    return f"HS-{maxn+1:03d}"
+            maxn = max(maxn, int(m.group(1)))
+    return f"HS-{maxn + 1:03d}"
 
 
 def add_feature(pdf_path: str, feature: Dict[str, str]) -> Dict[str, str]:
-    rows = read_master(pdf_path)
-    fid = next_id(rows)
-    feature_row = {k: "" for k in MASTER_HEADER}
-    feature_row.update(feature)
-    feature_row["id"] = fid
-    # ensure bx/by exist
-    feature_row.setdefault("bx", "0")
-    feature_row.setdefault("by", "0")
-    feature_row.setdefault("br", "14")
-    rows.append(feature_row)
-    write_master(pdf_path, rows)
-    return feature_row
+    with closing(_connect(pdf_path)) as conn:
+        fid = _next_feature_id(conn)
+        payload = {key: "" for key in MASTER_HEADER}
+        payload.update(feature)
+        payload["id"] = fid
+        payload.setdefault("bx", "0")
+        payload.setdefault("by", "0")
+        payload.setdefault("br", "14")
+        conn.execute(
+            f"INSERT INTO features ({', '.join(MASTER_HEADER)}) VALUES ({', '.join('?' for _ in MASTER_HEADER)})",
+            [payload.get(col, "") for col in MASTER_HEADER]
+        )
+        conn.commit()
+        return payload
 
 
 def update_feature(pdf_path: str, fid: str, updates: Dict[str, str]):
-    rows = read_master(pdf_path)
-    changed = False
-    for r in rows:
-        if r.get("id") == fid:
-            r.update(updates)
-            changed = True
-            break
-    if changed:
-        write_master(pdf_path, rows)
+    if not fid or not updates:
+        return
+    with closing(_connect(pdf_path)) as conn:
+        assignments = []
+        values = []
+        for key, value in updates.items():
+            if key not in MASTER_HEADER or key == "id":
+                continue
+            assignments.append(f"{key} = ?")
+            values.append(value)
+        if not assignments:
+            return
+        values.append(fid)
+        conn.execute(f"UPDATE features SET {', '.join(assignments)} WHERE id = ?", values)
+        conn.commit()
 
 
 def delete_feature(pdf_path: str, fid: str) -> bool:
-    rows = read_master(pdf_path)
-    new_rows = [r for r in rows if r.get("id") != fid]
-    if len(new_rows) == len(rows):
+    if not fid:
         return False
-    write_master(pdf_path, new_rows)
-    return True
+    with closing(_connect(pdf_path)) as conn:
+        cur = conn.execute("DELETE FROM features WHERE id = ?", (fid,))
+        conn.commit()
+        return cur.rowcount > 0
 
 
-# Work Order CSV helpers
 def wo_path(pdf_path: str, workorder: str) -> str:
+    """Return the legacy CSV path if it exists, else the SQLite db file for labeling purposes."""
     safe = workorder.replace("/", "_")
-    return f"{pdf_path}.{safe}.csv"
+    legacy = f"{pdf_path}.{safe}.csv"
+    if os.path.exists(legacy):
+        return legacy
+    return _db_path(pdf_path)
 
 
 def read_wo(pdf_path: str, workorder: str) -> Dict[str, str]:
-    path = wo_path(pdf_path, workorder)
-    if not os.path.exists(path):
+    if not workorder:
         return {}
-    res = {}
-    with open(path, newline="", encoding="utf-8") as f:
-        reader = csv.DictReader(f)
-        for r in reader:
-            res[r.get("id")] = r.get("result")
-    return res
+    with closing(_connect(pdf_path)) as conn:
+        cur = conn.execute(
+            "SELECT feature_id, result FROM results WHERE workorder = ?",
+            (workorder,)
+        )
+        return {row[0]: (row[1] or "") for row in cur.fetchall()}
 
 
 def write_wo(pdf_path: str, workorder: str, data: Dict[str, str]):
-    path = wo_path(pdf_path, workorder)
-    rows = []
-    for id_, result in data.items():
-        rows.append({"id": id_, "result": result})
-    atomic_write(path, rows, ["id", "result"])
+    if not workorder:
+        return
+    timestamp = datetime.utcnow().isoformat()
+    with closing(_connect(pdf_path)) as conn:
+        conn.execute("BEGIN")
+        conn.execute("DELETE FROM results WHERE workorder = ?", (workorder,))
+        for feature_id, result in data.items():
+            if not feature_id:
+                continue
+            conn.execute(
+                "INSERT INTO results (feature_id, workorder, result, updated_at) VALUES (?, ?, ?, ?)",
+                (feature_id, workorder, result, timestamp)
+            )
+        conn.commit()
+
+
+def get_workorder_timestamp(pdf_path: str, workorder: str):
+    if not workorder:
+        return None
+    with closing(_connect(pdf_path)) as conn:
+        row = conn.execute("SELECT MAX(updated_at) FROM results WHERE workorder = ?", (workorder,)).fetchone()
+    if row and row[0]:
+        try:
+            return datetime.fromisoformat(row[0])
+        except ValueError:
+            return None
+    return None
 
 
 def list_workorders(pdf_path: str) -> List[str]:
-    base_name = os.path.basename(pdf_path)
-    directory = os.path.dirname(pdf_path) or "."
-    prefix = f"{base_name}."
-    results: List[str] = []
-    try:
-        entries = os.listdir(directory)
-    except FileNotFoundError:
-        return results
-    for name in entries:
-        if not name.startswith(prefix) or not name.endswith(".csv"):
-            continue
-        if name == f"{base_name}.balloons.csv":
-            continue
-        full_path = os.path.join(directory, name)
-        if not os.path.isfile(full_path):
-            continue
-        token = name[len(prefix):-4]
-        if not token:
-            continue
-        results.append(token.replace("_", "/"))
-    results.sort(key=lambda s: s.lower())
-    return results
+    with closing(_connect(pdf_path)) as conn:
+        cur = conn.execute("SELECT DISTINCT workorder FROM results ORDER BY LOWER(workorder)")
+        return [row[0] for row in cur.fetchall() if row[0]]
 
 
 # Normalization for parsing tolerances

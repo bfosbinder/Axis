@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Dict, List, Optional
 
-from storage import read_master, list_workorders, read_wo, wo_path
+from storage import read_master, list_workorders, read_wo, wo_path, get_workorder_timestamp
 
 
 @dataclass
@@ -102,11 +102,12 @@ def load_spc_dataset(pdf_path: str) -> Dict[str, FeatureSPCData]:
     wo_entries = list_workorders(pdf_path)
     for wo in wo_entries:
         csv_path = wo_path(pdf_path, wo)
-        timestamp = None
-        try:
-            timestamp = datetime.fromtimestamp(os.path.getmtime(csv_path))
-        except OSError:
-            pass
+        timestamp = get_workorder_timestamp(pdf_path, wo)
+        if timestamp is None:
+            try:
+                timestamp = datetime.fromtimestamp(os.path.getmtime(csv_path))
+            except OSError:
+                pass
         results = read_wo(pdf_path, wo)
         for fid, text in results.items():
             value = _parse_float(text)

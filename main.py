@@ -1334,8 +1334,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if not self.pdf_path:
             QtWidgets.QMessageBox.information(self, 'No PDF', 'Open a PDF first.')
             return
-        allow_ballooning = not bool(self.rows)
-        if self._prompt_session(list_workorders(self.pdf_path), allow_ballooning=allow_ballooning):
+        if self._prompt_session(list_workorders(self.pdf_path)):
             self.refresh_table()
 
     def _prompt_session(self, previous_orders=None, allow_ballooning=True) -> bool:
@@ -1419,8 +1418,7 @@ class MainWindow(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.warning(self, 'Master Data', f'Could not prepare master data for this PDF.\n{exc}')
 
         self._load_rows()
-        allow_ballooning = not bool(self.rows)
-        if not self._prompt_session(list_workorders(self.pdf_path), allow_ballooning=allow_ballooning):
+        if not self._prompt_session(list_workorders(self.pdf_path)):
             self.mode = 'Ballooning'
             self.current_wo = None
         self._update_mode_ui()
