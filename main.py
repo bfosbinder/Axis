@@ -272,6 +272,7 @@ class BalloonItem(QtWidgets.QGraphicsEllipseItem):
 
 class PDFView(QtWidgets.QGraphicsView):
     rectPicked = QtCore.pyqtSignal(QtCore.QRect)
+    balloonClicked = QtCore.pyqtSignal(str)
 
     def __init__(self, controller, parent=None):
         super().__init__(parent)
@@ -427,6 +428,26 @@ class PDFView(QtWidgets.QGraphicsView):
             # rect is already a QRect; emit directly
             self.rectPicked.emit(rect)
         else:
+            # Click selection: emit balloonClicked(fid) when user clicks a balloon (not in pick-on-print)
+            if event.button() == QtCore.Qt.MouseButton.LeftButton:
+                pick_active = (self.controller.mode == 'Ballooning' and self.controller.pick_on_print)
+                if not pick_active:
+                    item = self.itemAt(event.pos())
+                    target = item
+                    # ascend to parent to find a BalloonItem or any item with a 'feature' dict
+                    while target is not None and not hasattr(target, 'feature'):
+                        target = target.parentItem()
+                    fid = None
+                    if target is not None and hasattr(target, 'feature'):
+                        try:
+                            fid = (target.feature or {}).get('id')
+                        except Exception:
+                            fid = None
+                    if fid:
+                        try:
+                            self.balloonClicked.emit(str(fid))
+                        except Exception:
+                            pass
             super().mouseReleaseEvent(event)
 
 
@@ -439,6 +460,7 @@ class PopoutWindow(QtWidgets.QMainWindow):
         self.view = PDFView(controller)
         self.setCentralWidget(self.view)
         self.view.rectPicked.connect(controller._rect_picked)
+        self.view.balloonClicked.connect(controller._balloon_clicked)
         tb = QtWidgets.QToolBar()
         self.addToolBar(tb)
         fit_act = QtGui.QAction('Fit', self)
@@ -449,6 +471,11 @@ class PopoutWindow(QtWidgets.QMainWindow):
         if scene is None:
             self.view.setScene(QtWidgets.QGraphicsScene(self.view))
             self.view._pixmap_item = None
+            return
+        current = self.view.scene()
+        if current is scene:
+            # Scene already attached; just refresh pixmap reference without altering zoom
+            self.view._pixmap_item = pixmap_item
             return
         self.view.setScene(scene)
         self.view._pixmap_item = pixmap_item
@@ -623,6 +650,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # PDF view on right
         self.pdf_view = PDFView(self)
         self.pdf_view.rectPicked.connect(self._rect_picked)
+        self.pdf_view.balloonClicked.connect(self._balloon_clicked)
         self.splitter.addWidget(left)
         self.splitter.addWidget(self.pdf_view)
         self.splitter.setStretchFactor(0, 1)
@@ -1027,14 +1055,14 @@ class MainWindow(QtWidgets.QMainWindow):
                 h = float(feature.get('h', 0))
             except Exception:
                 self._clear_highlight_rect()
-                return
+                # continue to focus even when auto-focus was suppressed
             rect_item = self._ensure_highlight_rect()
             if rect_item is not None:
                 rect_item.setRect(QtCore.QRectF(x, y, w, h))
                 rect_item.setVisible(True)
             else:
                 self._clear_highlight_rect()
-            return
+            # proceed to page sync + zoom/center
         self.selected_feature_id = fid
         try:
             page_idx = int(feature.get('page', '1')) - 1
@@ -1098,6 +1126,67 @@ class MainWindow(QtWidgets.QMainWindow):
             self._push_undo(lambda snap=snapshot: self._undo_deleted_feature(snap), f'Delete {fid}')
             self.statusBar().showMessage(f'Deleted {fid}', 3000)
 
+    def _balloon_clicked(self, fid: str):
+        # Select the checklist row matching fid and focus on it
+        if not fid or not self.pdf_path:
+            return
+        table = getattr(self, 'table', None)
+        if table is None:
+            return
+        # Try to find row under current filters
+        target_row = -1
+        for row in range(table.rowCount()):
+            id_item = table.item(row, 0)
+            if id_item and id_item.text().strip() == fid:
+                target_row = row
+                break
+        # If not found (likely filtered out), temporarily clear filters and refresh
+        if target_row < 0:
+            prev_method = self.method_filter.currentText() if isinstance(self.method_filter, QtWidgets.QComboBox) else 'All'
+            prev_status = self.status_filter.currentText() if isinstance(self.status_filter, QtWidgets.QComboBox) else 'All'
+            try:
+                if isinstance(self.method_filter, QtWidgets.QComboBox):
+                    self.method_filter.blockSignals(True)
+                    self.method_filter.setCurrentText('All')
+                    self.method_filter.blockSignals(False)
+                if isinstance(self.status_filter, QtWidgets.QComboBox):
+                    self.status_filter.blockSignals(True)
+                    self.status_filter.setCurrentText('All')
+                    self.status_filter.blockSignals(False)
+            except Exception:
+                pass
+            self.refresh_table()
+            for row in range(table.rowCount()):
+                id_item = table.item(row, 0)
+                if id_item and id_item.text().strip() == fid:
+                    target_row = row
+                    break
+            # Restore previous filters if desired; keep selection visible by leaving as-is
+            try:
+                if isinstance(self.method_filter, QtWidgets.QComboBox):
+                    self.method_filter.blockSignals(True)
+                    self.method_filter.setCurrentText(prev_method)
+                    self.method_filter.blockSignals(False)
+                if isinstance(self.status_filter, QtWidgets.QComboBox):
+                    self.status_filter.blockSignals(True)
+                    self.status_filter.setCurrentText(prev_status)
+                    self.status_filter.blockSignals(False)
+            except Exception:
+                pass
+            if target_row < 0:
+                return
+        try:
+            table.blockSignals(True)
+            table.selectRow(target_row)
+            table.blockSignals(False)
+        except Exception:
+            table.selectRow(target_row)
+        # Ensure row is centered in view
+        id_item = table.item(target_row, 0)
+        if id_item:
+            table.scrollToItem(id_item, QtWidgets.QAbstractItemView.ScrollHint.PositionAtCenter)
+        # Let _table_selection_changed handle page switch, focus, and highlight
+
     def _focus_on_feature(self, feature: dict):
         if not self.pdf_view._pixmap_item:
             return
@@ -1119,6 +1208,11 @@ class MainWindow(QtWidgets.QMainWindow):
         cy = y + (h / 2.0) + by
         center_point = QtCore.QPointF(cx, cy)
         self.pdf_view.set_zoom(zoom, center_point)
+        if self.popout_win and getattr(self.popout_win, 'view', None) and self.popout_win.view._pixmap_item:
+            try:
+                self.popout_win.view.set_zoom(zoom, center_point)
+            except Exception:
+                pass
         rect_item = self._ensure_highlight_rect()
         if rect_item is not None:
             rect_item.setRect(QtCore.QRectF(x, y, w, h))
@@ -1271,6 +1365,11 @@ class MainWindow(QtWidgets.QMainWindow):
     def fit_view(self):
         if self.pdf_view._pixmap_item:
             self.pdf_view.fit_to_view()
+        if self.popout_win and getattr(self.popout_win, 'view', None) and self.popout_win.view._pixmap_item:
+            try:
+                self.popout_win.view.fit_to_view()
+            except Exception:
+                pass
 
     def _open_popout_pdf(self):
         if not self.pdf_path or not self.doc:
@@ -1283,6 +1382,22 @@ class MainWindow(QtWidgets.QMainWindow):
         self.popout_win.show()
         self.popout_win.raise_()
         self._update_pdf_cursor()
+        # If a feature is selected, sync zoom/center immediately; else mirror main view transform
+        feature = None
+        if self.selected_feature_id:
+            feature = next((r for r in self.rows if r.get('id') == self.selected_feature_id), None)
+        if feature:
+            try:
+                self._focus_on_feature(feature)
+            except Exception:
+                pass
+        else:
+            try:
+                self.popout_win.view.setTransform(self.pdf_view.transform())
+                center_point = self.pdf_view.mapToScene(self.pdf_view.viewport().rect().center())
+                self.popout_win.view.centerOn(center_point)
+            except Exception:
+                pass
 
     def toggle_show_balloons(self, checked: bool):
         self.show_balloons = not checked
@@ -1488,9 +1603,18 @@ class MainWindow(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.warning(self, 'Master Data', f'Could not prepare master data for this PDF.\n{exc}')
 
         self._load_rows()
-        if not self._prompt_session(list_workorders(self.pdf_path)):
+        # Auto-select Ballooning when no existing data is present (empty master and no work orders)
+        try:
+            existing_orders = list_workorders(self.pdf_path)
+        except Exception:
+            existing_orders = []
+        if not self.rows and not existing_orders:
             self.mode = 'Ballooning'
             self.current_wo = None
+        else:
+            if not self._prompt_session(existing_orders):
+                self.mode = 'Ballooning'
+                self.current_wo = None
         self._update_mode_ui()
         self._update_page_controls_enabled()
         self._sync_page_spin()
@@ -1704,6 +1828,12 @@ class MainWindow(QtWidgets.QMainWindow):
                 continue
             feature['_pdf'] = self.pdf_path
             item = BalloonItem(feature, self.pdf_view._pixmap_item)
+            try:
+                fid = feature.get('id')
+                if fid:
+                    item.setData(QtCore.Qt.ItemDataRole.UserRole, fid)
+            except Exception:
+                pass
             self.pdf_view.scene().addItem(item)
             self.balloon_items.append(item)
         self._update_balloon_visibility()
@@ -1775,6 +1905,12 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         feature['_pdf'] = self.pdf_path
         item = BalloonItem(feature, self.pdf_view._pixmap_item)
+        try:
+            fid = feature.get('id')
+            if fid:
+                item.setData(QtCore.Qt.ItemDataRole.UserRole, fid)
+        except Exception:
+            pass
         self.pdf_view.scene().addItem(item)
         self.balloon_items.append(item)
         if not self.show_balloons:
