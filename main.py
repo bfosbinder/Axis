@@ -430,6 +430,42 @@ class PDFView(QtWidgets.QGraphicsView):
             super().mouseReleaseEvent(event)
 
 
+class PopoutWindow(QtWidgets.QMainWindow):
+    """Secondary window that mirrors the main PDF scene with independent zoom."""
+    def __init__(self, controller: "MainWindow"):
+        super().__init__(controller)
+        self.controller = controller
+        self.setWindowTitle('Axis – PDF Pop-out')
+        self.view = PDFView(controller)
+        self.setCentralWidget(self.view)
+        self.view.rectPicked.connect(controller._rect_picked)
+        tb = QtWidgets.QToolBar()
+        self.addToolBar(tb)
+        fit_act = QtGui.QAction('Fit', self)
+        fit_act.triggered.connect(self.view.fit_to_view)
+        tb.addAction(fit_act)
+
+    def attach_scene(self, scene: QtWidgets.QGraphicsScene | None, pixmap_item: QtWidgets.QGraphicsPixmapItem | None):
+        if scene is None:
+            self.view.setScene(QtWidgets.QGraphicsScene(self.view))
+            self.view._pixmap_item = None
+            return
+        self.view.setScene(scene)
+        self.view._pixmap_item = pixmap_item
+        if scene and not scene.sceneRect().isNull():
+            try:
+                self.view.fit_to_view()
+            except Exception:
+                pass
+
+    def closeEvent(self, event: QtGui.QCloseEvent):
+        try:
+            if hasattr(self.controller, 'popout_win'):
+                self.controller.popout_win = None
+        except Exception:
+            pass
+        return super().closeEvent(event)
+
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
@@ -463,6 +499,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._zoom_rerender_timer.timeout.connect(self._zoom_rerender_timeout)  # [ZOOM-DEBOUNCE]
         self._pending_zoom_scale = None  # [ZOOM-DEBOUNCE]
         self._balloons_built_for_page = None  # [ZOOM-DEBOUNCE]
+        self.popout_win = None
 
         self._build_ui()
         self._refresh_method_combobox_options()
@@ -474,6 +511,10 @@ class MainWindow(QtWidgets.QMainWindow):
         open_act = QtGui.QAction('Open PDF', self)
         open_act.triggered.connect(self.open_pdf)
         toolbar.addAction(open_act)
+
+        popout_act = QtGui.QAction('Pop Out PDF', self)
+        popout_act.triggered.connect(self._open_popout_pdf)
+        toolbar.addAction(popout_act)
 
         self.pick_btn = QtWidgets.QPushButton('Pick-on-Print')
         self.pick_btn.setCheckable(True)
@@ -1231,6 +1272,18 @@ class MainWindow(QtWidgets.QMainWindow):
         if self.pdf_view._pixmap_item:
             self.pdf_view.fit_to_view()
 
+    def _open_popout_pdf(self):
+        if not self.pdf_path or not self.doc:
+            QtWidgets.QMessageBox.information(self, 'Pop Out PDF', 'Open a PDF before popping it out.')
+            return
+        if self.popout_win is None:
+            self.popout_win = PopoutWindow(self)
+        self.popout_win.attach_scene(self.pdf_view.scene(), self.pdf_view._pixmap_item)
+        self.popout_win.resize(900, 700)
+        self.popout_win.show()
+        self.popout_win.raise_()
+        self._update_pdf_cursor()
+
     def toggle_show_balloons(self, checked: bool):
         self.show_balloons = not checked
         self.show_balloon_btn.setText('Show Balloons' if not self.show_balloons else 'Hide Balloons')
@@ -1244,6 +1297,11 @@ class MainWindow(QtWidgets.QMainWindow):
             view.setCursor(QtCore.Qt.CursorShape.CrossCursor)
         else:
             view.unsetCursor()
+        if self.popout_win and getattr(self.popout_win, 'view', None):
+            if self.pick_on_print and self.mode == 'Ballooning' and self.pdf_path:
+                self.popout_win.view.setCursor(QtCore.Qt.CursorShape.CrossCursor)
+            else:
+                self.popout_win.view.unsetCursor()
 
     def _run_ocr(self):
         if not self.doc:
@@ -1441,6 +1499,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.fit_view()
         self.refresh_table()
         self.statusBar().showMessage(f'Loaded {Path(path).name}', 4000)
+        # Attach shared scene to pop-out if it exists
+        if self.popout_win:
+            try:
+                self.popout_win.attach_scene(self.pdf_view.scene(), self.pdf_view._pixmap_item)
+            except Exception:
+                pass
 
     def _clear_loaded_pdf(self):
         self._undo_stack.clear()
@@ -1466,6 +1530,11 @@ class MainWindow(QtWidgets.QMainWindow):
         if self.pdf_view.scene():
             self.pdf_view.scene().clear()
             self.pdf_view._pixmap_item = None
+        if self.popout_win:
+            try:
+                self.popout_win.close()
+            except Exception:
+                pass
         self.table.setRowCount(0)
         self._update_mode_ui()
         self._update_page_controls_enabled()
