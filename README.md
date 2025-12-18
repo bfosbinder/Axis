@@ -1,215 +1,103 @@
-Axis Inspection & Ballooning App (Windows Release)
+Axis Inspection & Ballooning App
+================================
 
-Axis is a standalone Windows application for aerospace-quality inspection and drawing ballooning.
-It loads engineering PDFs, allows precise balloon placement, auto-generates inspection tables, and exports both inspection reports and ballooned PDFs.
+Axis is a production-ready Windows application for aerospace-quality inspection and drawing ballooning. It renders manufacturing PDFs, lets you place and edit precision balloons, captures inspection data by work order, and exports both ballooned drawings and formatted inspection reports.
 
-This Windows build is created automatically via GitHub Actions and requires no Python installation.
+---
 
-🚀 Features
-Ballooning Mode
+Key Capabilities
+----------------
 
-Click-and-drag to place balloons on any PDF drawing.
+* **Guided ballooning** – drag a rectangle on the drawing to create an auto-numbered balloon with stored page, bounds, zoom, offsets, and specs. Balloons are freely movable and can be resized in bulk.
+* **Inspection workflows** – choose Ballooning or Inspection mode per session. Work orders/serials retain their own measurement data, and PASS/FAIL status is recalculated automatically for numeric or text inputs.
+* **High-fidelity rendering** – PyMuPDF powers crisp PDF drawing at varying zoom levels; a QGraphicsView overlay keeps balloons and highlight rectangles aligned to document coordinates.
+* **Reporting** – export filtered inspection data to CSV, dump every recorded work order to a master CSV, and generate both `*_inspection.pdf` (tabulated results) and `*_ballooned.pdf` (drawing with annotations). Exports honor current filters and status formatting.
+* **Data integrity** – all feature metadata and inspection results live inside a single SQLite database beside the source PDF, with automatic migration from legacy CSV files.
 
-Move balloons freely; positions are saved automatically.
+---
 
-Auto-assigns balloon numbers.
+Installation
+------------
 
-Stores:
+### Windows executable (preferred)
+1. Navigate to **GitHub → Actions → “Build Windows EXE”**.
+2. Download the most recent artifact bundle and extract `AxisInspector.exe`.
+3. Run the executable directly—no installation or Python runtime required.
 
-Page
+System requirements: Windows 10/11 (64-bit), a PDF viewer for exported files, and preferably a 1080p+ display.
 
-Rectangle bounds
-
-Zoom level
-
-Balloon offset
-
-Nominal / LSL / USL
-
-Method
-
-Full undo support for added/deleted balloons.
-
-Inspection Mode
-
-Select a Work Order / Serial Number.
-
-Enter measurement results.
-
-Status updates automatically (PASS/FAIL).
-
-Supports “Pass/Fail” text or numeric values.
-
-Remembers results per work order.
-
-OCR (stub)
-
-OCR button placeholder for future integration.
-
-PDF Export
-
-Creates two PDFs:
-
-_inspection.pdf — formatted table of results
-
-_ballooned.pdf — original drawing with balloons drawn on top
-
-📦 Windows Download
-
-Compiled .exe builds are available under:
-
-GitHub → Actions → “Build Windows EXE” → Artifacts
-
-Download:
-
-AxisInspector.exe
-
-
-No installation required.
-Just run the executable.
-
-🖥️ System Requirements
-
-Windows 10 or 11 (64-bit)
-
-No Python needed
-
-PDF viewer installed (for exported documents)
-
-Recommended: 1080p or larger monitor
-
-📁 How Data Is Stored
-
-Axis now keeps everything (balloons + inspection results) in a single SQLite file next to your PDF:
-
-yourfile.pdf
-
-yourfile.axis.db
-
-The first time the `.axis.db` file is created, any legacy `*.balloons.csv` and work-order CSV files are imported automatically so existing projects continue to work.
-
-🛠️ How to Use
-1. Open a PDF
-
-File → Open PDF
-
-PDF renders on the right panel
-
-Table of features appears on the left
-
-2. Start a Session
-
-You will be prompted to choose:
-
-Ballooning Mode → create/edit balloons
-
-Inspection Mode → enter results
-
-You can change sessions later from the toolbar.
-
-3. Add Balloons (Ballooning Mode)
-
-Enable Pick-on-Print
-
-Click-and-drag a rectangle around the feature
-
-A balloon appears automatically
-
-Adjust size using the “Balloon size” control
-
-Move the balloon by dragging it
-
-Undo commands available:
-
-Press Ctrl+Z
-
-Or use the toolbar shortcut
-
-4. Enter Tolerances
-
-In Ballooning Mode, you can type:
-
-1.203 +/-.003
-
-
-or
-
-1.002 +.010 -.000
-
-
-The app parses and auto-fills:
-
-Nominal
-
-LSL
-
-USL
-
-5. Inspection
-
-In Inspection Mode, enter results directly in the “Result” column.
-
-Status updates automatically:
-
-Value within range → PASS
-
-Out of range → FAIL
-
-You may also type:
-
-P → Pass
-
-F → Fail
-
-6. Export PDFs
-
-Export PDFs produces:
-
-drawingname_inspection.pdf
-
-drawingname_ballooned.pdf
-
-Saved to your chosen directory.
-
-⌨️ Hotkeys
-Action	Key
-Toggle Pick Mode	P
-Toggle Grab Mode	G
-Undo	Ctrl+Z
-Fit-to-View	Button
-Select next result	Auto after entry
-📚 Technology Used
-
-PyQt6 — UI
-
-PyMuPDF (fitz) — PDF rendering/drawing
-
-QGraphicsView — balloon overlay system
-
-GitHub Actions — automatic Windows builds
-
-PyInstaller — EXE packaging
-
-🧪 Development Version (Python)
-
-If you choose to run the Python version:
-
+### Development build (Python)
+```bash
+python3 -m venv .venv
+source .venv/bin/activate        # use .venv\Scripts\activate on Windows
 pip install -r requirements.txt
 python main.py
+```
+Optional features: Pillow + pytesseract for OCR experiments.
 
-📄 License
+---
 
-MIT License (or your preferred license)
+Product Workflow
+----------------
 
-🙌 Contributions
+1. **Open a PDF** – `File → Open PDF`. The drawing loads on the right, the feature table on the left.
+2. **Choose a session** – the dialog prompts for Ballooning (edit geometry/specs) or Inspection (record measurements). You can switch sessions later via the toolbar action.
+3. **Ballooning mode**
+	* Enable *Pick-on-Print*, drag to define the feature bounds, and a balloon appears immediately.
+	* Adjust global balloon size, drag balloons to fine‑tune offsets, and rely on Ctrl+Z for undo.
+	* Enter tolerance strings (e.g., `1.203 +/-.003`) to auto-fill Nominal/LSL/USL.
+4. **Inspection mode**
+	* Select a Work Order / Serial Number.
+	* Enter numeric results or quick text (`P` / `F`). Status columns update in real time using stored specs.
+	* Results persist per work order so you can resume later.
+5. **Export** – use *Export Results* for a CSV snapshot of the current table (respecting filters), *Export All Results* for every work order/serial on the part, or *Export PDFs* for the formatted inspection table plus ballooned drawing.
 
-PRs welcome!
-Found a bug in the Windows EXE? Open an issue describing:
+---
 
-OS version
+Hotkeys
+-------
 
-PDF type
+| Action                | Shortcut |
+|-----------------------|----------|
+| Toggle Pick Mode      | `P`      |
+| Toggle Grab Mode      | `G`      |
+| Undo                  | `Ctrl+Z` |
+| Fit drawing to view   | Toolbar  |
+| Advance to next result| Auto after entry |
 
-Steps to reproduce
+---
 
-Screenshot if possible
+Data Storage
+------------
+
+Each PDF gains a sibling SQLite database: `yourfile.axis.db`. The database contains:
+
+* `features` – rows matching the legacy `MASTER_HEADER` schema (page, bounds, zoom, method, specs, offsets, radius).
+* `results` – measurement values per `(feature_id, workorder)` with timestamps.
+
+When the `.axis.db` file is created, the app automatically imports any `*.balloons.csv` and `<pdf>.<workorder>.csv` files it finds, so existing projects remain intact.
+
+---
+
+Technology Stack
+----------------
+
+* **PyQt6** – desktop UI, table widgets, and dialogs.
+* **PyMuPDF (fitz)** – fast PDF rendering with high-DPI support.
+* **QGraphicsView** – custom overlay for balloons and highlight rectangles.
+* **SQLite** – durable storage for features and inspection data.
+* **GitHub Actions + PyInstaller** – automated Windows builds and distribution.
+
+---
+
+Support & Contributions
+-----------------------
+
+Issues and pull requests are welcome. When reporting a bug, please include:
+
+* Windows version and GPU (if applicable)
+* PDF characteristics (page size, color usage, etc.)
+* Exact steps to reproduce
+* Screenshots or exported PDFs highlighting the problem
+
+License: MIT (or your selected alternative).*** End Patch

@@ -2,6 +2,7 @@ import sys
 import os
 import re
 import io
+import csv
 from functools import partial
 from pathlib import Path
 from datetime import datetime
@@ -526,6 +527,14 @@ class MainWindow(QtWidgets.QMainWindow):
         export_btn.clicked.connect(self.export_pdfs)
         toolbar.addWidget(export_btn)
 
+        export_results_btn = QtWidgets.QPushButton('Export Results')
+        export_results_btn.clicked.connect(self.export_results)
+        toolbar.addWidget(export_results_btn)
+
+        export_all_results_btn = QtWidgets.QPushButton('Export All Results')
+        export_all_results_btn.clicked.connect(self.export_all_results)
+        toolbar.addWidget(export_all_results_btn)
+
         edit_methods_btn = QtWidgets.QPushButton('Edit Methods')
         edit_methods_btn.clicked.connect(self._edit_methods)
         toolbar.addWidget(edit_methods_btn)
@@ -813,26 +822,29 @@ class MainWindow(QtWidgets.QMainWindow):
         lsl_text = lsl_item.text().strip() if lsl_item else ''
         usl_text = usl_item.text().strip() if usl_item else ''
 
-        status = '—'
-        if result_text:
-            upper = result_text.upper()
-            if upper in ('PASS', 'FAIL'):
-                status = upper
-            else:
-                try:
-                    value = float(result_text)
-                    lsl_val = float(lsl_text) if lsl_text else None
-                    usl_val = float(usl_text) if usl_text else None
-                    if lsl_val is not None and usl_val is not None:
-                        status = 'PASS' if lsl_val <= value <= usl_val else 'FAIL'
-                except Exception:
-                    status = '—'
+        status = self._status_from_fields(result_text, lsl_text, usl_text)
 
         if status_item:
             self.table.blockSignals(True)
             status_item.setText(status)
             self.table.blockSignals(False)
         self._apply_status_formatting(row, status)
+
+    def _status_from_fields(self, result_text: str, lsl_text: str, usl_text: str) -> str:
+        if not result_text:
+            return '—'
+        upper = result_text.upper()
+        if upper in ('PASS', 'FAIL'):
+            return upper
+        try:
+            value = float(result_text)
+            lsl_val = float(lsl_text) if lsl_text else None
+            usl_val = float(usl_text) if usl_text else None
+            if lsl_val is None or usl_val is None:
+                return '—'
+            return 'PASS' if lsl_val <= value <= usl_val else 'FAIL'
+        except Exception:
+            return '—'
 
     def _apply_status_formatting(self, row: int, status: str):
         table = getattr(self, 'table', None)
@@ -1786,6 +1798,115 @@ class MainWindow(QtWidgets.QMainWindow):
         msg_lines = [f'Inspection: {inspection_path}', f'Ballooned: {balloon_path}']
         QtWidgets.QMessageBox.information(self, 'Export PDFs', 'Created files:\n' + '\n'.join(f'- {line}' for line in msg_lines))
         self.statusBar().showMessage(f'Exported PDFs to {inspection_path.parent}', 5000)
+
+    def export_results(self):
+        if not self.pdf_path:
+            QtWidgets.QMessageBox.information(self, 'Export Results', 'Open a PDF before exporting results.')
+            return
+        table = getattr(self, 'table', None)
+        if table is None or table.rowCount() == 0:
+            QtWidgets.QMessageBox.information(self, 'Export Results', 'No rows available to export.')
+            return
+        rows = self._collect_visible_rows()
+        if not rows:
+            QtWidgets.QMessageBox.information(self, 'Export Results', 'The current filters produced no rows to export.')
+            return
+        headers = []
+        for col in range(table.columnCount()):
+            header_item = table.horizontalHeaderItem(col)
+            headers.append(header_item.text() if header_item else f'Column {col + 1}')
+        base = Path(self.pdf_path).stem
+        suffix_parts = ['results']
+        if self.mode == 'Inspection' and self.current_wo:
+            safe_wo = re.sub(r'[^A-Za-z0-9_-]+', '_', self.current_wo.strip()) or 'inspection'
+            suffix_parts.append(safe_wo)
+        default_name = f"{base}_{'_'.join(suffix_parts)}.csv"
+        default_dir = Path(self.pdf_path).parent if self.pdf_path else Path.home()
+        initial_path = default_dir / default_name
+        selection, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self,
+            'Export Results',
+            str(initial_path),
+            'CSV Files (*.csv)'
+        )
+        if not selection:
+            return
+        try:
+            with open(selection, 'w', newline='', encoding='utf-8') as handle:
+                writer = csv.writer(handle)
+                writer.writerow(headers)
+                writer.writerows(rows)
+        except Exception as exc:
+            QtWidgets.QMessageBox.critical(self, 'Export Results', f'Unable to write CSV.\n{exc}')
+            return
+        QtWidgets.QMessageBox.information(self, 'Export Results', f'Created {selection}')
+        self.statusBar().showMessage(f'Exported results to {selection}', 4000)
+
+    def export_all_results(self):
+        if not self.pdf_path:
+            QtWidgets.QMessageBox.information(self, 'Export All Results', 'Open a PDF before exporting results.')
+            return
+        workorders = list_workorders(self.pdf_path)
+        if not workorders:
+            QtWidgets.QMessageBox.information(self, 'Export All Results', 'No inspection results were found for this PDF.')
+            return
+        if not self.rows:
+            self._load_rows()
+        feature_map = {row.get('id'): row for row in self.rows if row.get('id')}
+        export_rows = []
+        for workorder in workorders:
+            results = read_wo(self.pdf_path, workorder)
+            if not results:
+                continue
+            for fid, result_value in results.items():
+                if not result_value:
+                    continue
+                feature = feature_map.get(fid)
+                if not feature:
+                    continue
+                normalized = self._normalize_result_entry(result_value)
+                status = self._status_from_fields(
+                    normalized.strip(),
+                    (feature.get('lsl') or '').strip(),
+                    (feature.get('usl') or '').strip()
+                )
+                export_rows.append([
+                    workorder,
+                    fid,
+                    feature.get('page', ''),
+                    (feature.get('method') or ''),
+                    (feature.get('nominal') or ''),
+                    (feature.get('lsl') or ''),
+                    (feature.get('usl') or ''),
+                    normalized,
+                    status,
+                ])
+        if not export_rows:
+            QtWidgets.QMessageBox.information(self, 'Export All Results', 'No measurement values were found to export.')
+            return
+        headers = ['Work Order', 'Feature ID', 'Page', 'Method', 'Nominal', 'LSL', 'USL', 'Result', 'Status']
+        base = Path(self.pdf_path).stem
+        default_name = f'{base}_all_results.csv'
+        default_dir = Path(self.pdf_path).parent if self.pdf_path else Path.home()
+        initial_path = default_dir / default_name
+        selection, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self,
+            'Export All Results',
+            str(initial_path),
+            'CSV Files (*.csv)'
+        )
+        if not selection:
+            return
+        try:
+            with open(selection, 'w', newline='', encoding='utf-8') as handle:
+                writer = csv.writer(handle)
+                writer.writerow(headers)
+                writer.writerows(export_rows)
+        except Exception as exc:
+            QtWidgets.QMessageBox.critical(self, 'Export All Results', f'Unable to write CSV.\n{exc}')
+            return
+        QtWidgets.QMessageBox.information(self, 'Export All Results', f'Created {selection}')
+        self.statusBar().showMessage(f'Exported all results to {selection}', 4000)
 
     def _collect_visible_rows(self):
         rows = []
