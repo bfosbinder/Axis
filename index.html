@@ -5,521 +5,127 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Axis — Inspection & Ballooning</title>
   <meta name="description" content="Axis is a production-ready Windows app for aerospace-quality inspection and drawing ballooning with PDF rendering, precision balloons, work order tracking, and exports." />
+
   <style>
     :root{
       --bg:#0b1020; --panel:#0f1730; --panel2:#0d142a; --text:#e7ecff; --muted:#b7c1ff;
-      --line:rgba(255,255,255,.12); --glow:rgba(120,160,255,.28); --accent:#79a4ff; --accent2:#8bffcf;
+      --line:rgba(255,255,255,.12); --accent:#79a4ff; --accent2:#8bffcf;
       --shadow:0 18px 55px rgba(0,0,0,.35);
       --r:18px;
-      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-      --sans: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji";
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      --sans: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
     }
     *{box-sizing:border-box}
-    html,body{height:100%}
     body{
       margin:0; font-family:var(--sans); color:var(--text);
-      background:
-        radial-gradient(900px 480px at 18% 18%, rgba(121,164,255,.25), transparent 60%),
-        radial-gradient(820px 520px at 82% 14%, rgba(139,255,207,.14), transparent 60%),
-        radial-gradient(900px 520px at 60% 92%, rgba(121,164,255,.16), transparent 65%),
-        linear-gradient(180deg, #060914, #0b1020 35%, #070a14);
-      overflow-x:hidden;
+      background:linear-gradient(180deg,#060914,#0b1020 40%,#070a14);
     }
     a{color:inherit}
-    .wrap{max-width:1120px; margin:0 auto; padding:24px 18px 80px}
-    header{
-      position:sticky; top:0; z-index:20;
-      backdrop-filter: blur(10px);
-      background: linear-gradient(180deg, rgba(11,16,32,.78), rgba(11,16,32,.38));
-      border-bottom:1px solid var(--line);
-    }
-    .nav{max-width:1120px; margin:0 auto; padding:14px 18px; display:flex; align-items:center; justify-content:space-between; gap:12px}
-    .brand{display:flex; align-items:center; gap:10px; font-weight:750; letter-spacing:.2px}
-    .logo{
-      width:34px; height:34px; border-radius:10px; position:relative;
-      background: linear-gradient(135deg, rgba(121,164,255,.92), rgba(139,255,207,.82));
-      box-shadow: 0 10px 30px rgba(121,164,255,.18);
-    }
-    .logo:before{
-      content:""; position:absolute; inset:7px; border-radius:8px;
-      background: linear-gradient(135deg, rgba(11,16,32,.95), rgba(15,23,48,.95));
-      border:1px solid rgba(255,255,255,.16);
-    }
-    .navlinks{display:flex; flex-wrap:wrap; gap:10px; align-items:center; justify-content:flex-end}
-    .navlinks a{
-      text-decoration:none; color:var(--muted); font-weight:600; font-size:14px;
-      padding:8px 10px; border-radius:12px; border:1px solid transparent;
-    }
-    .navlinks a:hover{color:var(--text); border-color:var(--line); background:rgba(255,255,255,.04)}
-    .cta{
-      text-decoration:none; font-weight:750; font-size:14px;
-      padding:9px 12px; border-radius:12px;
-      border:1px solid rgba(121,164,255,.55);
-      background: linear-gradient(180deg, rgba(121,164,255,.16), rgba(121,164,255,.06));
-      color:var(--text);
-    }
-    .cta:hover{box-shadow:0 0 0 6px rgba(121,164,255,.08)}
-    .hero{padding:40px 0 10px}
-    .grid{display:grid; gap:18px}
-    .heroGrid{grid-template-columns: 1.25fr .75fr}
-    @media (max-width: 980px){ .heroGrid{grid-template-columns:1fr} }
+    .wrap{max-width:1120px;margin:0 auto;padding:28px 18px 80px}
     .card{
-      background: linear-gradient(180deg, rgba(15,23,48,.92), rgba(13,20,42,.88));
-      border:1px solid var(--line);
-      border-radius: var(--r);
-      box-shadow: var(--shadow);
-      overflow:hidden;
+      background:linear-gradient(180deg,rgba(15,23,48,.92),rgba(13,20,42,.88));
+      border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow)
     }
-    .card.pad{padding:18px}
-    .kicker{color:var(--muted); font-weight:700; font-size:13px; letter-spacing:.35px; text-transform:uppercase}
-    h1{margin:10px 0 10px; font-size:42px; line-height:1.05; letter-spacing:-.6px}
-    @media (max-width: 520px){ h1{font-size:34px} }
-    .sub{color:rgba(231,236,255,.82); font-size:16px; line-height:1.55; max-width:70ch}
-    .pillrow{display:flex; flex-wrap:wrap; gap:10px; margin-top:16px}
+    h1{font-size:42px;margin:10px 0}
+    h2{margin:0 0 10px}
+    .pillrow{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
     .pill{
-      font-family:var(--mono); font-size:12px; color:rgba(231,236,255,.86);
-      padding:8px 10px; border-radius:999px;
-      border:1px solid rgba(255,255,255,.14);
-      background: rgba(255,255,255,.04);
+      font-family:var(--mono);font-size:12px;padding:7px 10px;border-radius:999px;
+      border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.04)
     }
-    .heroBtns{display:flex; gap:10px; flex-wrap:wrap; margin-top:18px}
+    .heroBtns{display:flex;gap:10px;margin-top:18px;flex-wrap:wrap}
     .btn{
-      cursor:pointer; user-select:none;
-      padding:10px 12px; border-radius:12px; font-weight:750; font-size:14px; text-decoration:none;
-      border:1px solid rgba(255,255,255,.14);
-      background: rgba(255,255,255,.06);
-      color:var(--text);
+      text-decoration:none;font-weight:700;font-size:14px;
+      padding:10px 14px;border-radius:12px;
+      border:1px solid rgba(255,255,255,.18);
+      background:rgba(255,255,255,.06)
     }
     .btn.primary{
-      border-color: rgba(139,255,207,.55);
-      background: linear-gradient(180deg, rgba(139,255,207,.14), rgba(139,255,207,.06));
+      border-color:rgba(139,255,207,.55);
+      background:linear-gradient(180deg,rgba(139,255,207,.14),rgba(139,255,207,.06))
     }
-    .btn:hover{box-shadow:0 0 0 6px rgba(255,255,255,.05)}
-    .mock{
-      padding:0;
-      position:relative;
-    }
-    .mockTop{
-      display:flex; align-items:center; justify-content:space-between;
-      padding:12px 14px; border-bottom:1px solid var(--line);
-      background: linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,.02));
-      font-family:var(--mono); font-size:12px; color:rgba(231,236,255,.78)
-    }
-    .dots{display:flex; gap:6px}
-    .dot{width:10px; height:10px; border-radius:999px; background:rgba(255,255,255,.18)}
-    .mockBody{padding:14px}
-    .ui{
-      display:grid; grid-template-columns: .9fr 1.1fr; gap:12px;
-      min-height:260px;
-    }
-    @media (max-width: 520px){ .ui{grid-template-columns:1fr} }
-    .pane{
-      border:1px solid rgba(255,255,255,.12);
-      background: rgba(0,0,0,.16);
-      border-radius: 14px;
-      overflow:hidden;
-    }
-    .pane .head{
-      padding:10px 10px; border-bottom:1px solid rgba(255,255,255,.10);
-      display:flex; justify-content:space-between; align-items:center;
-      font-family:var(--mono); font-size:12px; color:rgba(231,236,255,.72)
-    }
-    .pane .content{padding:10px}
-    .row{
-      display:flex; align-items:center; justify-content:space-between;
-      padding:8px 8px; border:1px solid rgba(255,255,255,.08);
-      background: rgba(255,255,255,.03);
-      border-radius: 12px; margin-bottom:8px;
-      font-size:13px;
-    }
-    .tag{
-      font-family:var(--mono); font-size:11px; padding:4px 8px; border-radius:999px;
-      border:1px solid rgba(121,164,255,.35); background: rgba(121,164,255,.10); color:rgba(231,236,255,.9);
-    }
-    .pdf{
-      position:relative; height:100%;
-      background:
-        linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.02)),
-        radial-gradient(220px 140px at 30% 30%, rgba(121,164,255,.18), transparent 70%),
-        radial-gradient(240px 160px at 70% 65%, rgba(139,255,207,.14), transparent 70%);
-    }
-    .pdf .sheet{
-      position:absolute; inset:14px; border-radius:14px;
-      border:1px solid rgba(255,255,255,.14);
-      background: linear-gradient(180deg, rgba(11,16,32,.70), rgba(0,0,0,.18));
-      overflow:hidden;
-    }
-    .overlay{
-      position:absolute; inset:0;
-    }
-    .balloon{
-      position:absolute; width:34px; height:34px; border-radius:999px;
-      border:1px solid rgba(255,255,255,.18);
-      background: radial-gradient(circle at 30% 30%, rgba(255,255,255,.25), rgba(255,255,255,.06));
-      display:grid; place-items:center;
-      font-family:var(--mono); font-weight:800; font-size:12px;
-      box-shadow: 0 14px 38px rgba(0,0,0,.28);
-    }
-    .rect{
-      position:absolute; border-radius:10px;
-      border:2px solid rgba(139,255,207,.65);
-      background: rgba(139,255,207,.08);
-      box-shadow: 0 0 0 6px rgba(139,255,207,.06);
-    }
-    .section{margin-top:26px}
-    .section h2{margin:0 0 8px; font-size:22px; letter-spacing:-.2px}
-    .section p{margin:0; color:rgba(231,236,255,.80); line-height:1.6}
-    .features{grid-template-columns: repeat(3, 1fr)}
-    @media (max-width: 980px){ .features{grid-template-columns: repeat(2, 1fr)} }
-    @media (max-width: 620px){ .features{grid-template-columns: 1fr} }
-    .feat{
-      padding:16px; border-radius: var(--r);
-      border:1px solid rgba(255,255,255,.12);
-      background: rgba(255,255,255,.03);
-    }
-    .feat h3{margin:10px 0 6px; font-size:16px}
-    .feat p{margin:0; color:rgba(231,236,255,.78); font-size:14px; line-height:1.55}
-    .icon{
-      width:40px; height:40px; border-radius:14px;
-      display:grid; place-items:center;
-      border:1px solid rgba(255,255,255,.14);
-      background: linear-gradient(180deg, rgba(121,164,255,.14), rgba(255,255,255,.03));
-      box-shadow: 0 0 0 6px rgba(121,164,255,.05);
-    }
-    .icon svg{opacity:.92}
-    .twoCol{grid-template-columns: 1fr 1fr}
-    @media (max-width: 980px){ .twoCol{grid-template-columns:1fr} }
-    .steps{counter-reset: step}
-    .step{
-      position:relative;
-      padding:14px 14px 14px 50px;
-      border-radius: var(--r);
-      border:1px solid rgba(255,255,255,.12);
-      background: rgba(255,255,255,.03);
-      margin-bottom:10px;
-    }
-    .step:before{
-      counter-increment: step;
-      content: counter(step);
-      position:absolute; left:14px; top:14px;
-      width:26px; height:26px; border-radius:10px;
-      display:grid; place-items:center;
-      font-family:var(--mono); font-weight:900; font-size:12px;
-      color:rgba(231,236,255,.92);
-      border:1px solid rgba(121,164,255,.35);
-      background: rgba(121,164,255,.10);
-    }
-    .step b{display:block; margin-bottom:4px}
-    table{width:100%; border-collapse:separate; border-spacing:0; overflow:hidden}
-    .table{
-      border:1px solid rgba(255,255,255,.12);
-      border-radius: var(--r);
-      overflow:hidden;
-      background: rgba(255,255,255,.03);
-    }
-    th,td{padding:10px 12px; text-align:left; font-size:14px}
-    th{color:rgba(231,236,255,.85); background: rgba(255,255,255,.04); border-bottom:1px solid rgba(255,255,255,.10)}
-    td{color:rgba(231,236,255,.78); border-bottom:1px solid rgba(255,255,255,.08)}
-    tr:last-child td{border-bottom:none}
-    code,kbd{
-      font-family:var(--mono);
-      font-size:12px;
-      padding:2px 7px;
-      border-radius:8px;
-      border:1px solid rgba(255,255,255,.16);
-      background: rgba(0,0,0,.22);
-      color:rgba(231,236,255,.9);
-      white-space:nowrap;
-    }
-    .install{
-      display:flex; flex-direction:column; gap:10px;
-    }
+    .section{margin-top:34px}
     .callout{
-      padding:16px; border-radius: var(--r);
+      padding:16px;border-radius:var(--r);
       border:1px solid rgba(139,255,207,.35);
-      background: linear-gradient(180deg, rgba(139,255,207,.10), rgba(255,255,255,.02));
+      background:linear-gradient(180deg,rgba(139,255,207,.10),rgba(255,255,255,.02))
     }
-    .callout p{margin:0; color:rgba(231,236,255,.82)}
+    .small{font-size:13px;opacity:.8}
     .footer{
-      margin-top:26px; padding-top:18px; border-top:1px solid rgba(255,255,255,.10);
-      color:rgba(231,236,255,.68); font-size:13px; display:flex; flex-wrap:wrap; justify-content:space-between; gap:10px
+      margin-top:40px;padding-top:18px;border-top:1px solid rgba(255,255,255,.1);
+      display:flex;justify-content:space-between;font-size:13px;opacity:.7
     }
-    .small{font-size:13px; color:rgba(231,236,255,.72); line-height:1.55}
   </style>
 </head>
+
 <body>
-  <header>
-    <div class="nav">
-      <div class="brand">
-        <div class="logo" aria-hidden="true"></div>
-        <div>Axis<span style="opacity:.7"> · </span><span style="opacity:.85">Inspection & Ballooning</span></div>
-      </div>
-      <nav class="navlinks">
-        <a href="#features">Features</a>
-        <a href="#workflow">Workflow</a>
-        <a href="#exports">Exports</a>
-        <a href="#hotkeys">Hotkeys</a>
-        <a class="cta" href="#get">Get Axis</a>
-      </nav>
-    </div>
-  </header>
-
   <main class="wrap">
-    <section class="hero">
-      <div class="grid heroGrid">
-        <div class="card pad">
-          <div class="kicker">Production-ready for aerospace inspection</div>
-          <h1>Balloon drawings. Capture results. Export reports.</h1>
-          <p class="sub">
-            Axis is a Windows application for aerospace-quality inspection and drawing ballooning.
-            Render manufacturing PDFs, place and edit precision balloons, record measurements by work order/serial,
-            and export ballooned drawings plus formatted inspection reports—backed by a single SQLite database per PDF.
-          </p>
-          <div class="pillrow" aria-label="Highlights">
-            <span class="pill">PyMuPDF rendering</span>
-            <span class="pill">QGraphicsView overlay</span>
-            <span class="pill">SQLite per PDF</span>
-            <span class="pill">PDF + CSV exports</span>
-            <span class="pill">Ballooning + Inspection sessions</span>
-          </div>
-          <div class="heroBtns">
-            <a class="btn primary"
-   href="https://github.com/bfosbinder/Axis/releases/download/latest/AxisInspector.exe"
-   download>
-  Download (Windows EXE)
-</a>
 
-            <a class="btn" href="#workflow">See workflow</a>
-            <a class="btn" href="#tech">Tech stack</a>
-          </div>
-          <p class="small" style="margin-top:12px">
-            System requirements: Windows 10/11 (64-bit), a PDF viewer for exports, and preferably a 1080p+ display.
-          </p>
-        </div>
+    <!-- HERO -->
+    <section class="card" style="padding:22px">
+      <div class="small">Production-ready for aerospace inspection</div>
+      <h1>Balloon drawings. Capture results. Export reports.</h1>
+      <p class="small" style="max-width:70ch">
+        Axis is a Windows application for aerospace-quality inspection and drawing ballooning.
+        Render manufacturing PDFs, place precision balloons, record measurements by work order/serial,
+        and export ballooned drawings plus formatted inspection reports—backed by a single SQLite database per PDF.
+      </p>
 
-        <div class="card mock" aria-label="UI preview (stylized)">
-          <div class="mockTop">
-            <span>AxisInspector.exe</span>
-            <span class="dots" aria-hidden="true"><span class="dot"></span><span class="dot"></span><span class="dot"></span></span>
-          </div>
-          <div class="mockBody">
-            <div class="ui">
-              <div class="pane">
-                <div class="head"><span>Feature Table</span><span class="tag">Filters · PASS/FAIL</span></div>
-                <div class="content">
-                  <div class="row"><span>Balloon 12 — Ø0.250</span><span class="tag">PASS</span></div>
-                  <div class="row"><span>Balloon 13 — 1.203 ± .003</span><span class="tag">FAIL</span></div>
-                  <div class="row"><span>Balloon 14 — TEXT</span><span class="tag">PASS</span></div>
-                  <div class="row"><span>Balloon 15 — Positional</span><span class="tag">—</span></div>
-                  <div class="row"><span>Balloon 16 — Surface</span><span class="tag">—</span></div>
-                </div>
-              </div>
-              <div class="pane pdf">
-                <div class="sheet">
-                  <div class="overlay">
-                    <div class="rect" style="left:18%; top:20%; width:46%; height:20%"></div>
-                    <div class="balloon" style="left:68%; top:18%">13</div>
-                    <div class="balloon" style="left:22%; top:55%">14</div>
-                    <div class="balloon" style="left:55%; top:62%">15</div>
-                  </div>
-                </div>
-                <div class="head" style="position:absolute; left:14px; right:14px; bottom:14px;">
-                  <span>Pick-on-Print · Drag rectangle → auto-numbered balloon</span>
-                  <span class="tag">Ctrl+Z</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
+      <div class="pillrow">
+        <span class="pill">PyMuPDF rendering</span>
+        <span class="pill">QGraphicsView overlay</span>
+        <span class="pill">SQLite per PDF</span>
+        <span class="pill">PDF + CSV exports</span>
+        <span class="pill">Ballooning + Inspection</span>
       </div>
+
+      <div class="heroBtns">
+        <a class="btn primary"
+           href="https://github.com/bfosbinder/Axis/releases/download/latest/AxisInspector.exe"
+           download>
+          Download (Windows EXE)
+        </a>
+
+        <a class="btn" href="https://github.com/bfosbinder/Axis">View Source</a>
+        <a class="btn" href="https://github.com/bfosbinder/Axis/releases/latest">Release Notes</a>
+      </div>
+
+      <p class="small" style="margin-top:12px">
+        System requirements: Windows 10/11 (64-bit), 1080p+ display recommended.
+      </p>
     </section>
 
-    <section id="features" class="section">
-      <h2>Key capabilities</h2>
-      <p>Everything you need to balloon drawings, run inspection workflows, and export clean results—without juggling separate files.</p>
-
-      <div class="grid features" style="margin-top:14px">
-        <div class="feat">
-          <div class="icon" aria-hidden="true">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-              <path d="M4 7h16M7 4v16M4 17h16" stroke="currentColor" stroke-width="2" opacity=".9"/>
-              <path d="M14 10h6v6h-6z" stroke="currentColor" stroke-width="2"/>
-            </svg>
-          </div>
-          <h3>Guided ballooning</h3>
-          <p>Drag a rectangle on the drawing to create an auto-numbered balloon with stored page, bounds, zoom, offsets, and specs. Move balloons freely and resize in bulk.</p>
-        </div>
-
-        <div class="feat">
-          <div class="icon" aria-hidden="true">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-              <path d="M7 7h10v10H7z" stroke="currentColor" stroke-width="2"/>
-              <path d="M9 3h12v12" stroke="currentColor" stroke-width="2" opacity=".85"/>
-            </svg>
-          </div>
-          <h3>High-fidelity PDF rendering</h3>
-          <p>PyMuPDF provides crisp PDF drawing at varying zoom levels; a QGraphicsView overlay keeps balloons and highlights aligned to document coordinates.</p>
-        </div>
-
-        <div class="feat">
-          <div class="icon" aria-hidden="true">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-              <path d="M7 4h10v4H7zM7 10h10v10H7z" stroke="currentColor" stroke-width="2"/>
-              <path d="M9 13h6M9 16h6" stroke="currentColor" stroke-width="2" opacity=".85"/>
-            </svg>
-          </div>
-          <h3>Inspection workflows</h3>
-          <p>Choose Ballooning or Inspection mode per session. Work orders/serials keep their own measurement data, and PASS/FAIL recalculates automatically for numeric or text inputs.</p>
-        </div>
-
-        <div class="feat">
-          <div class="icon" aria-hidden="true">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-              <path d="M12 3v12" stroke="currentColor" stroke-width="2"/>
-              <path d="M7 10l5 5 5-5" stroke="currentColor" stroke-width="2"/>
-              <path d="M5 21h14" stroke="currentColor" stroke-width="2" opacity=".85"/>
-            </svg>
-          </div>
-          <h3>Reporting & exports</h3>
-          <p>Export filtered inspection data to CSV, dump every work order to a master CSV, and generate both <code>*_inspection.pdf</code> and <code>*_ballooned.pdf</code>. Exports honor filters and status formatting.</p>
-        </div>
-
-        <div class="feat">
-          <div class="icon" aria-hidden="true">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-              <path d="M12 2l8 4v6c0 5-3.5 9-8 10-4.5-1-8-5-8-10V6l8-4z" stroke="currentColor" stroke-width="2"/>
-              <path d="M9 12l2 2 4-5" stroke="currentColor" stroke-width="2" opacity=".9"/>
-            </svg>
-          </div>
-          <h3>Data integrity</h3>
-          <p>All feature metadata and inspection results live in a single SQLite database next to the PDF, with automatic migration from legacy CSV files.</p>
-        </div>
-
-        <div class="feat">
-          <div class="icon" aria-hidden="true">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-              <path d="M4 19V5h16v14H4z" stroke="currentColor" stroke-width="2"/>
-              <path d="M7 8h10M7 12h6M7 16h10" stroke="currentColor" stroke-width="2" opacity=".85"/>
-            </svg>
-          </div>
-          <h3>Tolerance parsing</h3>
-          <p>Enter tolerance strings like <code>1.203 +/-.003</code> to auto-fill Nominal/LSL/USL and drive real-time status evaluation.</p>
-        </div>
-      </div>
-    </section>
-
-    <section id="workflow" class="section">
-      <div class="grid twoCol">
-        <div class="card pad">
-          <h2>Product workflow</h2>
-          <p style="margin-bottom:12px">From PDF → balloons → measured results → exports, with everything saved per work order.</p>
-          <div class="steps">
-            <div class="step"><b>Open a PDF</b><span class="small">Use <code>File → Open PDF</code>. The drawing renders on the right, feature table on the left.</span></div>
-            <div class="step"><b>Choose a session</b><span class="small">Start in Ballooning (edit geometry/specs) or Inspection (record measurements). Switch later via toolbar.</span></div>
-            <div class="step"><b>Ballooning mode</b><span class="small">Enable Pick-on-Print, drag bounds, and a balloon appears immediately. Adjust size, offsets, and undo with <kbd>Ctrl+Z</kbd>.</span></div>
-            <div class="step"><b>Inspection mode</b><span class="small">Pick Work Order / Serial. Enter numeric values or quick text (<code>P</code>/<code>F</code>). Status updates live.</span></div>
-            <div class="step"><b>Export</b><span class="small">CSV snapshot (filtered), full master CSV (all WOs), and PDFs for both inspection table and ballooned drawing.</span></div>
-          </div>
-        </div>
-
-        <div class="card pad">
-          <h2>Data storage (per PDF)</h2>
-          <p>Each drawing gets a sibling database: <code>yourfile.axis.db</code>.</p>
-          <div class="callout" style="margin-top:12px">
-            <p><b>features</b> — feature rows matching the legacy master schema (page, bounds, zoom, method, specs, offsets, radius).</p>
-            <p style="margin-top:8px"><b>results</b> — measurement values per <code>(feature_id, workorder)</code> with timestamps.</p>
-          </div>
-          <p class="small" style="margin-top:12px">
-            When the DB is created, Axis automatically imports legacy <code>*.balloons.csv</code> and <code>&lt;pdf&gt;.&lt;workorder&gt;.csv</code> it finds so existing projects remain intact.
-          </p>
-        </div>
-      </div>
-    </section>
-
-    <section id="exports" class="section">
-      <div class="grid twoCol">
-        <div class="card pad">
-          <h2>Export outputs</h2>
-          <div class="table" style="margin-top:12px">
-            <table>
-              <thead>
-                <tr><th>Export</th><th>What you get</th></tr>
-              </thead>
-              <tbody>
-                <tr><td><b>Export Results</b></td><td>CSV snapshot of the current table (respects filters and formatting).</td></tr>
-                <tr><td><b>Export All Results</b></td><td>Master CSV dump of every recorded work order/serial for that part.</td></tr>
-                <tr><td><b>Export PDFs</b></td><td><code>*_inspection.pdf</code> tabulated results + <code>*_ballooned.pdf</code> annotated drawing.</td></tr>
-              </tbody>
-            </table>
-          </div>
-          <p class="small" style="margin-top:12px">Exports honor current filters and status formatting (PASS/FAIL) so what you see is what you ship.</p>
-        </div>
-
-        <div class="card pad">
-          <h2 id="hotkeys">Hotkeys</h2>
-          <div class="table" style="margin-top:12px">
-            <table>
-              <thead>
-                <tr><th>Action</th><th>Shortcut</th></tr>
-              </thead>
-              <tbody>
-                <tr><td>Toggle Pick Mode</td><td><kbd>P</kbd></td></tr>
-                <tr><td>Toggle Grab Mode</td><td><kbd>G</kbd></td></tr>
-                <tr><td>Undo</td><td><kbd>Ctrl</kbd> + <kbd>Z</kbd></td></tr>
-                <tr><td>Fit drawing to view</td><td>Toolbar</td></tr>
-                <tr><td>Advance to next result</td><td>Auto after entry</td></tr>
-              </tbody>
-            </table>
-          </div>
-          <p class="small" style="margin-top:12px">Designed for speed on the shop floor: minimal clicks, reliable undo, and fast navigation.</p>
-        </div>
-      </div>
-    </section>
-
+    <!-- GET AXIS -->
     <section id="get" class="section">
-      <div class="grid twoCol">
-        <div class="card pad">
-          <h2>Get Axis</h2>
-          <div class="install">
-            <div class="callout">
-              <p><b>Windows executable (preferred)</b><br>
-                GitHub → Actions → <b>“Build Windows EXE”</b> → download the most recent artifact bundle → extract and run <code>AxisInspector.exe</code> (no install, no Python required).</p>
-            </div>
-            <div class="callout">
-              <p><b>Development build (Python)</b></p>
-              <pre style="margin:10px 0 0; padding:12px; border-radius:14px; border:1px solid rgba(255,255,255,.12); background:rgba(0,0,0,.22); overflow:auto; font-family:var(--mono); font-size:12px; color:rgba(231,236,255,.88)"><code>python3 -m venv .venv
-source .venv/bin/activate        # use .venv\Scripts\activate on Windows
+      <div class="card" style="padding:22px">
+        <h2>Get Axis</h2>
+
+        <div class="callout" style="margin-top:12px">
+          <p><b>Windows executable (preferred)</b><br>
+            <a href="https://github.com/bfosbinder/Axis/releases/download/latest/AxisInspector.exe" download>
+              Download AxisInspector.exe
+            </a>
+            — no installer, no Python required.
+          </p>
+        </div>
+
+        <div class="callout" style="margin-top:12px">
+          <p><b>Development build (Python)</b></p>
+<pre style="margin-top:8px;font-family:var(--mono);font-size:12px">
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
-python main.py</code></pre>
-              <p class="small" style="margin-top:10px">Optional OCR experiments: Pillow + pytesseract.</p>
-            </div>
-          </div>
+python main.py
+</pre>
         </div>
-
-        <div class="card pad" id="tech">
-          <h2>Technology stack</h2>
-          <p>Built for performance, precision, and durable data.</p>
-          <div class="pillrow" style="margin-top:12px">
-            <span class="pill">PyQt6</span>
-            <span class="pill">PyMuPDF (fitz)</span>
-            <span class="pill">QGraphicsView overlay</span>
-            <span class="pill">SQLite</span>
-            <span class="pill">GitHub Actions</span>
-            <span class="pill">PyInstaller</span>
-          </div>
-          <div class="callout" style="margin-top:12px">
-            <p><b>Support & contributions</b><br>
-              When reporting a bug, include Windows version + GPU, PDF characteristics, exact repro steps, and screenshots or exported PDFs.</p>
-            <p class="small" style="margin-top:8px">License: MIT (or your selected alternative).</p>
-          </div>
-        </div>
-      </div>
-
-      <div class="footer">
-        <div>© <span id="year"></span> Axis · Inspection & Ballooning</div>
-        <div>Built for aerospace-quality workflows · PDF → balloons → results → exports</div>
       </div>
     </section>
+
+    <div class="footer">
+      <div>© <span id="year"></span> Axis · Inspection & Ballooning</div>
+      <div>PDF → balloons → results → exports</div>
+    </div>
+
   </main>
 
   <script>
