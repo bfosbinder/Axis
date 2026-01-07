@@ -176,7 +176,7 @@ def _next_feature_id(conn: sqlite3.Connection) -> str:
         m = re.search(r"(\d+)$", vid)
         if m:
             maxn = max(maxn, int(m.group(1)))
-    return f"HS-{maxn + 1:03d}"
+    return f"{maxn + 1:03d}"
 
 
 def add_feature(pdf_path: str, feature: Dict[str, str]) -> Dict[str, str]:

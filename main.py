@@ -2057,21 +2057,24 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         if not self.rows:
             self._load_rows()
-        feature_map = {row.get('id'): row for row in self.rows if row.get('id')}
+        features = [row for row in self.rows if row.get('id')]
+        if not features:
+            QtWidgets.QMessageBox.information(self, 'Export All Results', 'No features were found to export.')
+            return
         export_rows = []
         for workorder in workorders:
-            results = read_wo(self.pdf_path, workorder)
-            if not results:
-                continue
-            for fid, result_value in results.items():
-                if not result_value:
+            results = read_wo(self.pdf_path, workorder) or {}
+            # Emit a row for every feature so missing measurements appear in the export.
+            for feature in features:
+                fid = feature.get('id')
+                if not fid:
                     continue
-                feature = feature_map.get(fid)
-                if not feature:
-                    continue
-                normalized = self._normalize_result_entry(result_value)
+                raw_value = results.get(fid, '')
+                normalized = self._normalize_result_entry(str(raw_value)) if raw_value is not None else ''
+                has_result = bool(normalized.strip())
+                display_value = normalized if has_result else 'N/A'
                 status = self._status_from_fields(
-                    normalized.strip(),
+                    normalized.strip() if has_result else '',
                     (feature.get('lsl') or '').strip(),
                     (feature.get('usl') or '').strip()
                 )
@@ -2083,12 +2086,9 @@ class MainWindow(QtWidgets.QMainWindow):
                     (feature.get('nominal') or ''),
                     (feature.get('lsl') or ''),
                     (feature.get('usl') or ''),
-                    normalized,
+                    display_value,
                     status,
                 ])
-        if not export_rows:
-            QtWidgets.QMessageBox.information(self, 'Export All Results', 'No measurement values were found to export.')
-            return
         headers = ['Work Order', 'Feature ID', 'Page', 'Method', 'Nominal', 'LSL', 'USL', 'Result', 'Status']
         base = Path(self.pdf_path).stem
         default_name = f'{base}_all_results.csv'
