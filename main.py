@@ -3,6 +3,7 @@ import os
 import re
 import io
 import csv
+import json
 from functools import partial
 from pathlib import Path
 from datetime import datetime
@@ -19,6 +20,8 @@ except ImportError:  # Pillow is optional until OCR runs
 
 BALLOON_RADIUS = 14
 PAGE_RENDER_ZOOM = 1.5
+RECENT_FILE_LIMIT = 10
+RECENT_STORE_PATH = Path.home() / '.axis_recent.json'
 
 
 def format_number(value: float, decimals: int = 6) -> str:
@@ -527,6 +530,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._pending_zoom_scale = None  # [ZOOM-DEBOUNCE]
         self._balloons_built_for_page = None  # [ZOOM-DEBOUNCE]
         self.popout_win = None
+        self._recent_files = self._read_recent_files()
+        self._recent_menu = None
+        self._recent_button = None
 
         self._build_ui()
         self._refresh_method_combobox_options()
@@ -538,6 +544,15 @@ class MainWindow(QtWidgets.QMainWindow):
         open_act = QtGui.QAction('Open PDF', self)
         open_act.triggered.connect(self.open_pdf)
         toolbar.addAction(open_act)
+
+        self._recent_menu = QtWidgets.QMenu(self)
+        recent_btn = QtWidgets.QToolButton()
+        recent_btn.setText('Open Recent')
+        recent_btn.setPopupMode(QtWidgets.QToolButton.ToolButtonPopupMode.InstantPopup)
+        recent_btn.setMenu(self._recent_menu)
+        toolbar.addWidget(recent_btn)
+        self._recent_button = recent_btn
+        self._populate_recent_menu()
 
         popout_act = QtGui.QAction('Pop Out PDF', self)
         popout_act.triggered.connect(self._open_popout_pdf)
@@ -659,6 +674,79 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self._update_balloon_size_controls_enabled()
         self._update_page_controls_enabled()
+
+    def _read_recent_files(self) -> list[str]:
+        try:
+            with RECENT_STORE_PATH.open('r', encoding='utf-8') as handle:
+                data = json.load(handle)
+        except FileNotFoundError:
+            return []
+        except Exception:
+            return []
+        items = []
+        if isinstance(data, list):
+            for entry in data:
+                if isinstance(entry, str) and entry:
+                    items.append(entry)
+                    if len(items) >= RECENT_FILE_LIMIT:
+                        break
+        return items
+
+    def _write_recent_files(self) -> None:
+        try:
+            RECENT_STORE_PATH.parent.mkdir(parents=True, exist_ok=True)
+            with RECENT_STORE_PATH.open('w', encoding='utf-8') as handle:
+                json.dump(self._recent_files[:RECENT_FILE_LIMIT], handle)
+        except Exception:
+            pass
+
+    def _populate_recent_menu(self) -> None:
+        menu = self._recent_menu
+        if menu is None:
+            return
+        menu.clear()
+        if not self._recent_files:
+            placeholder = menu.addAction('No recent PDFs')
+            placeholder.setEnabled(False)
+            return
+        for path in self._recent_files:
+            label = Path(path).name or path
+            action = menu.addAction(label)
+            action.setToolTip(path)
+            action.triggered.connect(partial(self._open_recent_entry, path))
+        menu.addSeparator()
+        clear_action = menu.addAction('Clear Recent PDFs')
+        clear_action.triggered.connect(self._clear_recent_files)
+
+    def _remember_recent_file(self, path: str) -> None:
+        try:
+            resolved = str(Path(path).expanduser().resolve())
+        except Exception:
+            resolved = os.path.abspath(path)
+        existing = [item for item in self._recent_files if item != resolved]
+        existing.insert(0, resolved)
+        self._recent_files = existing[:RECENT_FILE_LIMIT]
+        self._write_recent_files()
+        self._populate_recent_menu()
+
+    def _open_recent_entry(self, path: str) -> None:
+        if not path:
+            return
+        target = Path(path)
+        if not target.exists():
+            QtWidgets.QMessageBox.information(self, 'Open Recent', 'The selected PDF could not be found.')
+            self._recent_files = [item for item in self._recent_files if item != path]
+            self._write_recent_files()
+            self._populate_recent_menu()
+            return
+        self._load_pdf(str(target))
+
+    def _clear_recent_files(self) -> None:
+        if not self._recent_files:
+            return
+        self._recent_files = []
+        self._write_recent_files()
+        self._populate_recent_menu()
 
     def refresh_table(self):
         table = getattr(self, 'table', None)
@@ -1623,6 +1711,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.fit_view()
         self.refresh_table()
         self.statusBar().showMessage(f'Loaded {Path(path).name}', 4000)
+        self._remember_recent_file(path)
         # Attach shared scene to pop-out if it exists
         if self.popout_win:
             try:
