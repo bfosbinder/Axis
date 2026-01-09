@@ -1,37 +1,38 @@
-name: Build Windows EXE
+name: Build Windows EXE (Latest)
 
 on:
   push:
     branches: [ main ]
-  pull_request:
-    branches: [ main ]
-  workflow_dispatch:  # allows manual run
+  workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build-windows-exe:
     runs-on: windows-latest
-
     steps:
-      - name: Check out code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.11"
 
-      - name: Install dependencies
+      - name: Install deps
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pyinstaller
 
-      - name: Build EXE with PyInstaller
-        run: |
-          pyinstaller --noconfirm --onefile --name AxisInspector main.py
+      - name: Build EXE
+        run: pyinstaller --noconfirm --onefile --name AxisInspector main.py
 
-      - name: Upload EXE artifact
-        uses: actions/upload-artifact@v4
+      - name: Create/Update "latest" release + upload EXE
+        uses: ncipollo/release-action@v1
         with:
-          name: AxisInspector-windows
-          path: dist/AxisInspector.exe
+          tag: latest
+          name: Latest
+          allowUpdates: true
+          replacesArtifacts: true
+          artifacts: dist/AxisInspector.exe
+          artifactContentType: application/vnd.microsoft.portable-executable

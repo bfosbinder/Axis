@@ -3,6 +3,9 @@ Axis Inspection & Ballooning App
 
 Axis is a production-ready Windows application for aerospace-quality inspection and drawing ballooning. It renders manufacturing PDFs, lets you place and edit precision balloons, captures inspection data by work order, and exports both ballooned drawings and formatted inspection reports.
 
+**Project page:** https://bfosbinder.github.io/Axis/
+
+
 ---
 
 Key Capabilities
@@ -20,9 +23,13 @@ Installation
 ------------
 
 ### Windows executable (preferred)
-1. Navigate to **GitHub → Actions → “Build Windows EXE”**.
-2. Download the most recent artifact bundle and extract `AxisInspector.exe`.
-3. Run the executable directly—no installation or Python runtime required.
+Download the latest Windows build from **GitHub Releases**:
+
+1. Go to **https://github.com/bfosbinder/Axis/releases/latest**
+   *(or download directly from https://github.com/bfosbinder/Axis/releases/download/latest/AxisInspector.exe)*.
+2. Download `AxisInspector.exe`.
+3. Run the executable directly — no installer and no Python runtime required.
+
 
 System requirements: Windows 10/11 (64-bit), a PDF viewer for exported files, and preferably a 1080p+ display.
 

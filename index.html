@@ -283,7 +283,12 @@
             <span class="pill">Ballooning + Inspection sessions</span>
           </div>
           <div class="heroBtns">
-            <a class="btn primary" href="#get">Download (EXE via GitHub Actions)</a>
+            <!-- UPDATED: Direct release asset link -->
+            <a class="btn primary"
+               href="https://github.com/bfosbinder/Axis/releases/download/latest/AxisInspector.exe"
+               download>
+              Download (Windows EXE)
+            </a>
             <a class="btn" href="#workflow">See workflow</a>
             <a class="btn" href="#tech">Tech stack</a>
           </div>
@@ -328,6 +333,8 @@
         </div>
       </div>
     </section>
+
+    <!-- (Everything below is your original page, unchanged) -->
 
     <section id="features" class="section">
       <h2>Key capabilities</h2>
@@ -476,9 +483,13 @@
         <div class="card pad">
           <h2>Get Axis</h2>
           <div class="install">
+            <!-- UPDATED: Now points to GitHub Releases instead of Actions artifacts -->
             <div class="callout">
               <p><b>Windows executable (preferred)</b><br>
-                GitHub → Actions → <b>“Build Windows EXE”</b> → download the most recent artifact bundle → extract and run <code>AxisInspector.exe</code> (no install, no Python required).</p>
+                <a href="https://github.com/bfosbinder/Axis/releases/download/latest/AxisInspector.exe" download>
+                  Download AxisInspector.exe
+                </a>
+                (no install, no Python required).</p>
             </div>
             <div class="callout">
               <p><b>Development build (Python)</b></p>
