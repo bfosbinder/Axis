@@ -1,4 +1,5 @@
 import csv
+import getpass
 import os
 import re
 import sqlite3
@@ -6,7 +7,7 @@ from contextlib import closing
 from datetime import datetime
 from typing import Dict, List, Tuple
 
-MASTER_HEADER = ["id", "page", "x", "y", "w", "h", "zoom", "method", "nominal", "lsl", "usl", "bx", "by", "br"]
+MASTER_HEADER = ["id", "page", "x", "y", "w", "h", "zoom", "method", "nominal", "lsl", "usl", "bx", "by", "br", "username"]
 DB_SUFFIX = ".axis.db"
 
 
@@ -24,6 +25,7 @@ def ensure_master(pdf_path: str) -> str:
     try:
         if init_needed:
             _initialize_db(conn)
+        _ensure_feature_schema(conn)
         _maybe_migrate_from_csv(pdf_path, conn)
     finally:
         conn.close()
@@ -47,7 +49,8 @@ def _initialize_db(conn: sqlite3.Connection):
             usl TEXT,
             bx TEXT,
             by TEXT,
-            br TEXT
+            br TEXT,
+            username TEXT
         )
         """
     )
@@ -73,6 +76,14 @@ def _connect(pdf_path: str) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     return conn
+
+
+def _ensure_feature_schema(conn: sqlite3.Connection):
+    cursor = conn.execute("PRAGMA table_info(features)")
+    columns = {row[1] for row in cursor.fetchall()}
+    if "username" not in columns:
+        conn.execute("ALTER TABLE features ADD COLUMN username TEXT")
+        conn.commit()
 
 
 def _maybe_migrate_from_csv(pdf_path: str, conn: sqlite3.Connection):
@@ -221,6 +232,13 @@ def delete_feature(pdf_path: str, fid: str) -> bool:
         cur = conn.execute("DELETE FROM features WHERE id = ?", (fid,))
         conn.commit()
         return cur.rowcount > 0
+
+
+def current_username() -> str:
+    try:
+        return getpass.getuser()
+    except Exception:
+        return os.environ.get("USERNAME") or os.environ.get("USER") or ""
 
 
 def wo_path(pdf_path: str, workorder: str) -> str:

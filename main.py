@@ -9,7 +9,7 @@ from pathlib import Path
 from datetime import datetime
 import fitz  # PyMuPDF
 from PyQt6 import QtWidgets, QtGui, QtCore
-from storage import ensure_master, read_master, add_feature, update_feature, delete_feature, read_wo, write_wo, write_master, parse_tolerance_expression, normalize_str, MASTER_HEADER, list_workorders
+from storage import ensure_master, read_master, add_feature, update_feature, delete_feature, read_wo, write_wo, write_master, parse_tolerance_expression, normalize_str, MASTER_HEADER, list_workorders, current_username
 import spc
 
 try:
@@ -497,6 +497,16 @@ class PopoutWindow(QtWidgets.QMainWindow):
         return super().closeEvent(event)
 
 class MainWindow(QtWidgets.QMainWindow):
+    COL_ID = 0
+    COL_PAGE = 1
+    COL_METHOD = 2
+    COL_USERNAME = 3
+    COL_RESULT = 4
+    COL_NOMINAL = 5
+    COL_LSL = 6
+    COL_USL = 7
+    COL_STATUS = 8
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle('Axis')
@@ -652,8 +662,8 @@ class MainWindow(QtWidgets.QMainWindow):
         filter_layout.addWidget(self.status_filter)
         lv.addLayout(filter_layout)
 
-        self.table = QtWidgets.QTableWidget(0, 8)
-        self.table.setHorizontalHeaderLabels(['ID', 'Page', 'Method', 'Result', 'Nominal', 'LSL', 'USL', 'Status'])
+        self.table = QtWidgets.QTableWidget(0, 9)
+        self.table.setHorizontalHeaderLabels(['ID', 'Page', 'Method', 'User', 'Result', 'Nominal', 'LSL', 'USL', 'Status'])
         self.table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.SingleSelection)
         self.table.cellChanged.connect(self.table_cell_changed)
@@ -765,6 +775,7 @@ class MainWindow(QtWidgets.QMainWindow):
             nom = r.get('nominal', '')
             lsl = r.get('lsl', '')
             usl = r.get('usl', '')
+            creator = r.get('username', '')
             status = '—'
             if self.mode == 'Ballooning':
                 # no persistent result; editable cell used for auto-fill only
@@ -808,11 +819,11 @@ class MainWindow(QtWidgets.QMainWindow):
                     it.setFlags(it.flags() & ~QtCore.Qt.ItemFlag.ItemIsEditable)
                 return it
 
-            self.table.setItem(row, 0, make_item(id_, False))
-            self.table.setItem(row, 1, make_item(page, False))
+            self.table.setItem(row, self.COL_ID, make_item(id_, False))
+            self.table.setItem(row, self.COL_PAGE, make_item(page, False))
             can_edit_specs = (self.mode == 'Ballooning')
             method_item = make_item(method, False)
-            self.table.setItem(row, 2, method_item)
+            self.table.setItem(row, self.COL_METHOD, method_item)
             combo = QtWidgets.QComboBox()
             combo.setEditable(False)
             combo.setInsertPolicy(QtWidgets.QComboBox.InsertPolicy.NoInsert)
@@ -826,15 +837,18 @@ class MainWindow(QtWidgets.QMainWindow):
             combo.setCurrentText(method)
             combo.setEnabled(self.mode == 'Ballooning')
             combo.currentTextChanged.connect(partial(self._method_combo_changed, row))
-            self.table.setCellWidget(row, 2, combo)
+            self.table.setCellWidget(row, self.COL_METHOD, combo)
+            has_result = bool((result or '').strip())
+            display_user = creator if self.mode == 'Ballooning' or has_result else ''
+            self.table.setItem(row, self.COL_USERNAME, make_item(display_user, False))
             itm_result = QtWidgets.QTableWidgetItem(result)
             # Result editable in both modes (Ballooning: used for tol autofill; Inspection: writes to WO)
             itm_result.setFlags(itm_result.flags() | QtCore.Qt.ItemFlag.ItemIsEditable)
-            table.setItem(row, 3, itm_result)
-            table.setItem(row, 4, make_item(nom, can_edit_specs))
-            table.setItem(row, 5, make_item(lsl, can_edit_specs))
-            table.setItem(row, 6, make_item(usl, can_edit_specs))
-            table.setItem(row, 7, make_item(status, False))
+            table.setItem(row, self.COL_RESULT, itm_result)
+            table.setItem(row, self.COL_NOMINAL, make_item(nom, can_edit_specs))
+            table.setItem(row, self.COL_LSL, make_item(lsl, can_edit_specs))
+            table.setItem(row, self.COL_USL, make_item(usl, can_edit_specs))
+            table.setItem(row, self.COL_STATUS, make_item(status, False))
             self._apply_status_formatting(row, status)
 
         self._refresh_method_combobox_options()
@@ -846,7 +860,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if self.selected_feature_id:
             target_row = None
             for idx in range(table.rowCount()):
-                item = table.item(idx, 0)
+                item = table.item(idx, self.COL_ID)
                 if item and item.text() == self.selected_feature_id:
                     target_row = idx
                     break
@@ -861,11 +875,11 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def table_cell_changed(self, row, col):
         # handle edits per column without full-table refresh to avoid editor warnings
-        id_item = self.table.item(row, 0)
+        id_item = self.table.item(row, self.COL_ID)
         if not id_item:
             return
         fid = id_item.text()
-        if col == 3:  # Result column
+        if col == self.COL_RESULT:
             val_item = self.table.item(row, col)
             val = val_item.text() if val_item else ''
             normalized = self._normalize_result_entry(val)
@@ -898,10 +912,10 @@ class MainWindow(QtWidgets.QMainWindow):
                                 r['lsl'] = formatted_lsl
                                 r['usl'] = formatted_usl
                                 self.table.blockSignals(True)
-                                self.table.item(row, 3).setText('')
-                                self.table.item(row, 4).setText(formatted_nom)
-                                self.table.item(row, 5).setText(formatted_lsl)
-                                self.table.item(row, 6).setText(formatted_usl)
+                                self.table.item(row, self.COL_RESULT).setText('')
+                                self.table.item(row, self.COL_NOMINAL).setText(formatted_nom)
+                                self.table.item(row, self.COL_LSL).setText(formatted_lsl)
+                                self.table.item(row, self.COL_USL).setText(formatted_usl)
                                 self.table.blockSignals(False)
                             except Exception:
                                 pass
@@ -911,24 +925,52 @@ class MainWindow(QtWidgets.QMainWindow):
                 wo_results = read_wo(self.pdf_path, self.current_wo)
                 wo_results[fid] = val
                 write_wo(self.pdf_path, self.current_wo, wo_results)
+                inspector = (current_username() or '').strip()
+                if inspector and self.pdf_path:
+                    update_feature(self.pdf_path, fid, {'username': inspector})
+                for r in self.rows:
+                    if r.get('id') == fid:
+                        r['username'] = inspector
+                        break
+                user_item = self.table.item(row, self.COL_USERNAME)
+                if user_item is None:
+                    user_item = QtWidgets.QTableWidgetItem(inspector)
+                    user_item.setFlags(user_item.flags() & ~QtCore.Qt.ItemFlag.ItemIsEditable)
+                    try:
+                        self.table.blockSignals(True)
+                        self.table.setItem(row, self.COL_USERNAME, user_item)
+                    finally:
+                        self.table.blockSignals(False)
+                else:
+                    try:
+                        self.table.blockSignals(True)
+                        user_item.setText(inspector)
+                    finally:
+                        self.table.blockSignals(False)
                 self._recompute_row_status(row)
             self._advance_result_edit(row)
             return
-        if self.mode == 'Ballooning' and col == 4:
+        if self.mode == 'Ballooning' and col == self.COL_NOMINAL:
             text_item = self.table.item(row, col)
             text_value = text_item.text() if text_item else ''
             if self._try_apply_tolerance_entry(row, fid, text_value):
                 return
         # Ballooning: editing Method/Nom/LSL/USL persists to master
-        if self.mode == 'Ballooning' and col in (2, 4, 5, 6):
-            text = self.table.item(row, col).text()
-            key = {2: 'method', 4: 'nominal', 5: 'lsl', 6: 'usl'}[col]
+        if self.mode == 'Ballooning' and col in (self.COL_METHOD, self.COL_NOMINAL, self.COL_LSL, self.COL_USL):
+            item_ref = self.table.item(row, col)
+            text = item_ref.text() if item_ref else ''
+            key = {
+                self.COL_METHOD: 'method',
+                self.COL_NOMINAL: 'nominal',
+                self.COL_LSL: 'lsl',
+                self.COL_USL: 'usl',
+            }[col]
             update_feature(self.pdf_path, fid, {key: text})
             for r in self.rows:
                 if r.get('id') == fid:
                     r[key] = text
                     break
-            if col == 2:
+            if col == self.COL_METHOD:
                 self._refresh_method_combobox_options()
             self._recompute_row_status(row)
             return
@@ -942,9 +984,9 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         next_row = current_row + 1
         while next_row < table.rowCount():
-            next_item = table.item(next_row, 3)
+            next_item = table.item(next_row, self.COL_RESULT)
             if next_item is not None:
-                table.setCurrentCell(next_row, 3)
+                table.setCurrentCell(next_row, self.COL_RESULT)
 
                 def _start_edit(target_row=next_row):
                     table_ref = getattr(self, 'table', None)
@@ -952,7 +994,7 @@ class MainWindow(QtWidgets.QMainWindow):
                         return
                     if target_row < 0 or target_row >= table_ref.rowCount():
                         return
-                    item_ref = table_ref.item(target_row, 3)
+                    item_ref = table_ref.item(target_row, self.COL_RESULT)
                     if item_ref is None:
                         return
                     try:
@@ -968,11 +1010,11 @@ class MainWindow(QtWidgets.QMainWindow):
     def _recompute_row_status(self, row: int):
         if row < 0 or row >= self.table.rowCount():
             return
-        result_item = self.table.item(row, 3)
-        nom_item = self.table.item(row, 4)
-        lsl_item = self.table.item(row, 5)
-        usl_item = self.table.item(row, 6)
-        status_item = self.table.item(row, 7)
+        result_item = self.table.item(row, self.COL_RESULT)
+        nom_item = self.table.item(row, self.COL_NOMINAL)
+        lsl_item = self.table.item(row, self.COL_LSL)
+        usl_item = self.table.item(row, self.COL_USL)
+        status_item = self.table.item(row, self.COL_STATUS)
 
         result_text = result_item.text().strip() if result_item else ''
         nom_text = nom_item.text().strip() if nom_item else ''
@@ -1020,7 +1062,7 @@ class MainWindow(QtWidgets.QMainWindow):
         bold_status = status in ('PASS', 'FAIL')
         color = palette.get(status.upper() if isinstance(status, str) else status)
         text_color = text_colors.get(status.upper() if isinstance(status, str) else status, QtGui.QColor(220, 220, 220))
-        for col in (3, 7):
+        for col in (self.COL_RESULT, self.COL_STATUS):
             item = table.item(row, col)
             if not item:
                 continue
@@ -1092,7 +1134,7 @@ class MainWindow(QtWidgets.QMainWindow):
             return False
         try:
             table.blockSignals(True)
-            for col, value in ((4, formatted_nom), (5, formatted_lsl), (6, formatted_usl)):
+            for col, value in ((self.COL_NOMINAL, formatted_nom), (self.COL_LSL, formatted_lsl), (self.COL_USL, formatted_usl)):
                 item = table.item(row, col)
                 if item is None:
                     item = QtWidgets.QTableWidgetItem(value)
@@ -1121,7 +1163,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._apply_balloon_selection_visuals()
                 self._clear_highlight_rect()
                 return
-        id_item = self.table.item(row, 0)
+        id_item = self.table.item(row, self.COL_ID)
         if not id_item:
             return
         fid = id_item.text()
@@ -1193,7 +1235,7 @@ class MainWindow(QtWidgets.QMainWindow):
         table = getattr(self, 'table', None)
         if table is None or row < 0 or row >= table.rowCount():
             return
-        id_item = table.item(row, 0)
+        id_item = table.item(row, self.COL_ID)
         if not id_item:
             return
         fid = id_item.text().strip()
@@ -1224,7 +1266,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # Try to find row under current filters
         target_row = -1
         for row in range(table.rowCount()):
-            id_item = table.item(row, 0)
+            id_item = table.item(row, self.COL_ID)
             if id_item and id_item.text().strip() == fid:
                 target_row = row
                 break
@@ -1245,7 +1287,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 pass
             self.refresh_table()
             for row in range(table.rowCount()):
-                id_item = table.item(row, 0)
+                id_item = table.item(row, self.COL_ID)
                 if id_item and id_item.text().strip() == fid:
                     target_row = row
                     break
@@ -1270,7 +1312,7 @@ class MainWindow(QtWidgets.QMainWindow):
         except Exception:
             table.selectRow(target_row)
         # Ensure row is centered in view
-        id_item = table.item(target_row, 0)
+        id_item = table.item(target_row, self.COL_ID)
         if id_item:
             table.scrollToItem(id_item, QtWidgets.QAbstractItemView.ScrollHint.PositionAtCenter)
         # Let _table_selection_changed handle page switch, focus, and highlight
@@ -1314,22 +1356,22 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         if row < 0 or row >= table.rowCount():
             return
-        combo = table.cellWidget(row, 2)
+        combo = table.cellWidget(row, self.COL_METHOD)
         if isinstance(combo, QtWidgets.QComboBox) and not combo.isEnabled():
             # keep combo text aligned with stored value when editing is disabled
-            item = table.item(row, 2)
+            item = table.item(row, self.COL_METHOD)
             if item and combo.currentText() != item.text():
                 combo.blockSignals(True)
                 combo.setCurrentText(item.text())
                 combo.blockSignals(False)
             return
-        item = table.item(row, 2)
+        item = table.item(row, self.COL_METHOD)
         if not item:
             return
         if item.text() == text:
             return
         item.setText(text)
-        id_item = table.item(row, 0)
+        id_item = table.item(row, self.COL_ID)
         fid = id_item.text() if id_item else None
         if not fid:
             return
@@ -1374,7 +1416,7 @@ class MainWindow(QtWidgets.QMainWindow):
         seen = {value.lower() for value in base}
         extras = []
         for row in range(table.rowCount()):
-            item = table.item(row, 2)
+            item = table.item(row, self.COL_METHOD)
             if not item:
                 continue
             value = item.text().strip()
@@ -1386,7 +1428,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 seen.add(key)
         ordered_options = base + sorted(extras, key=lambda s: s.lower())
         for row in range(table.rowCount()):
-            combo = table.cellWidget(row, 2)
+            combo = table.cellWidget(row, self.COL_METHOD)
             if not isinstance(combo, QtWidgets.QComboBox):
                 continue
             current = combo.currentText()
@@ -2162,6 +2204,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 normalized = self._normalize_result_entry(str(raw_value)) if raw_value is not None else ''
                 has_result = bool(normalized.strip())
                 display_value = normalized if has_result else 'N/A'
+                creator = (feature.get('username') or '')
                 status = self._status_from_fields(
                     normalized.strip() if has_result else '',
                     (feature.get('lsl') or '').strip(),
@@ -2172,13 +2215,14 @@ class MainWindow(QtWidgets.QMainWindow):
                     fid,
                     feature.get('page', ''),
                     (feature.get('method') or ''),
+                    creator if has_result else '',
                     (feature.get('nominal') or ''),
                     (feature.get('lsl') or ''),
                     (feature.get('usl') or ''),
                     display_value,
                     status,
                 ])
-        headers = ['Work Order', 'Feature ID', 'Page', 'Method', 'Nominal', 'LSL', 'USL', 'Result', 'Status']
+        headers = ['Work Order', 'Feature ID', 'Page', 'Method', 'User', 'Nominal', 'LSL', 'USL', 'Result', 'Status']
         base = Path(self.pdf_path).stem
         default_name = f'{base}_all_results.csv'
         default_dir = Path(self.pdf_path).parent if self.pdf_path else Path.home()
@@ -2218,12 +2262,12 @@ class MainWindow(QtWidgets.QMainWindow):
                     else:
                         row_values.append('')
             # Ensure status reflects the latest logic even if the table paint left it blank
-            if column_count > 7:
-                status_text = (row_values[7] or '').strip().upper()
+            if column_count > self.COL_STATUS:
+                status_text = (row_values[self.COL_STATUS] or '').strip().upper()
                 if status_text not in ('PASS', 'FAIL', '—'):
-                    result_text = (row_values[3] or '').strip()
-                    lsl_text = (row_values[5] or '').strip()
-                    usl_text = (row_values[6] or '').strip()
+                    result_text = (row_values[self.COL_RESULT] or '').strip()
+                    lsl_text = (row_values[self.COL_LSL] or '').strip()
+                    usl_text = (row_values[self.COL_USL] or '').strip()
                     computed = '—'
                     if result_text:
                         upper = result_text.upper()
@@ -2238,7 +2282,7 @@ class MainWindow(QtWidgets.QMainWindow):
                                     computed = 'PASS' if lsl_val <= value <= usl_val else 'FAIL'
                             except Exception:
                                 computed = '—'
-                    row_values[7] = computed
+                    row_values[self.COL_STATUS] = computed
             rows.append(row_values)
         return rows
 
@@ -2272,10 +2316,15 @@ class MainWindow(QtWidgets.QMainWindow):
             page_rect = fitz.Rect(0, 0, page_rect.height, page_rect.width)
         margin = 36
         line_height = 16
+        status_idx = self.COL_STATUS
+        result_idx = self.COL_RESULT
+        lsl_idx = self.COL_LSL
+        usl_idx = self.COL_USL
         columns = [
             ('ID', 60, 0),
             ('Page', 40, 1),
             ('Method', 110, 0),
+            ('User', 90, 0),
             ('Result', 80, 2),
             ('Nominal', 80, 2),
             ('LSL', 80, 2),
@@ -2327,12 +2376,12 @@ class MainWindow(QtWidgets.QMainWindow):
         def compute_status_from_row(row_values: list[str]) -> str:
             if not row_values:
                 return '—'
-            status_raw = row_values[7] if len(row_values) > 7 else ''
+            status_raw = row_values[status_idx] if len(row_values) > status_idx else ''
             if status_raw:
                 upper = status_raw.strip().upper()
                 if upper in ('PASS', 'FAIL'):
                     return upper
-            result_text = row_values[3].strip() if len(row_values) > 3 and row_values[3] else ''
+            result_text = row_values[result_idx].strip() if len(row_values) > result_idx and row_values[result_idx] else ''
             if not result_text:
                 return '—'
             upper_res = result_text.upper()
@@ -2343,11 +2392,11 @@ class MainWindow(QtWidgets.QMainWindow):
             except Exception:
                 return '—'
             try:
-                lsl_val = float(row_values[5]) if len(row_values) > 5 and row_values[5] else None
+                lsl_val = float(row_values[lsl_idx]) if len(row_values) > lsl_idx and row_values[lsl_idx] else None
             except Exception:
                 lsl_val = None
             try:
-                usl_val = float(row_values[6]) if len(row_values) > 6 and row_values[6] else None
+                usl_val = float(row_values[usl_idx]) if len(row_values) > usl_idx and row_values[usl_idx] else None
             except Exception:
                 usl_val = None
             if lsl_val is not None and usl_val is not None:
@@ -2370,9 +2419,9 @@ class MainWindow(QtWidgets.QMainWindow):
                 for idx, (title, width, align) in enumerate(columns):
                     value = row[idx] if idx < row_len else ''
                     rect = fitz.Rect(x, cursor_y, x + width, cursor_y + line_height)
-                    if idx in (3, 7):
+                    if idx in (result_idx, status_idx):
                         page.draw_rect(rect, color=None, fill=fill_color, width=0)
-                    if idx == 7:
+                    if idx == status_idx:
                         if status_key in status_colors:
                             font_name = 'Times-Bold'
                             color = text_color
