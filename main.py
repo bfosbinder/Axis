@@ -9,7 +9,22 @@ from pathlib import Path
 from datetime import datetime
 import fitz  # PyMuPDF
 from PyQt6 import QtWidgets, QtGui, QtCore
-from storage import ensure_master, read_master, add_feature, update_feature, delete_feature, read_wo, write_wo, write_master, parse_tolerance_expression, normalize_str, MASTER_HEADER, list_workorders, current_username
+from storage import (
+    ensure_master,
+    read_master,
+    add_feature,
+    update_feature,
+    delete_feature,
+    read_wo,
+    read_wo_notes,
+    write_master,
+    parse_tolerance_expression,
+    normalize_str,
+    MASTER_HEADER,
+    list_workorders,
+    current_username,
+    upsert_result_entry,
+)
 import spc
 
 try:
@@ -22,6 +37,8 @@ BALLOON_RADIUS = 14
 PAGE_RENDER_ZOOM = 1.5
 RECENT_FILE_LIMIT = 10
 RECENT_STORE_PATH = Path.home() / '.axis_recent.json'
+LAYOUT_HORIZONTAL = 'horizontal'
+LAYOUT_VERTICAL = 'vertical'
 
 
 def format_number(value: float, decimals: int = 6) -> str:
@@ -505,7 +522,8 @@ class MainWindow(QtWidgets.QMainWindow):
     COL_NOMINAL = 5
     COL_LSL = 6
     COL_USL = 7
-    COL_STATUS = 8
+    COL_NOTES = 8
+    COL_STATUS = 9
 
     def __init__(self):
         super().__init__()
@@ -540,7 +558,15 @@ class MainWindow(QtWidgets.QMainWindow):
         self._pending_zoom_scale = None  # [ZOOM-DEBOUNCE]
         self._balloons_built_for_page = None  # [ZOOM-DEBOUNCE]
         self.popout_win = None
+        self._layout_pref = LAYOUT_HORIZONTAL
+        self._split_orientation = QtCore.Qt.Orientation.Horizontal
+        self._table_panel = None
         self._recent_files = self._read_recent_files()
+        if self._layout_pref == LAYOUT_VERTICAL:
+            self._split_orientation = QtCore.Qt.Orientation.Vertical
+        if self._layout_pref not in (LAYOUT_HORIZONTAL, LAYOUT_VERTICAL):
+            self._layout_pref = LAYOUT_HORIZONTAL
+            self._split_orientation = QtCore.Qt.Orientation.Horizontal
         self._recent_menu = None
         self._recent_button = None
 
@@ -597,6 +623,13 @@ class MainWindow(QtWidgets.QMainWindow):
         spc_btn.clicked.connect(self._open_spc_dashboard)
         toolbar.addWidget(spc_btn)
 
+        self.layout_toggle_act = QtGui.QAction('Table Below PDF', self)
+        self.layout_toggle_act.setCheckable(True)
+        self.layout_toggle_act.setChecked(self._layout_pref == LAYOUT_VERTICAL)
+        self.layout_toggle_act.setToolTip('Toggle table under the PDF view')
+        self.layout_toggle_act.toggled.connect(self._layout_toggle_toggled)
+        toolbar.addAction(self.layout_toggle_act)
+
         self.balloon_size_label = QtWidgets.QLabel('Balloon size:')
         toolbar.addWidget(self.balloon_size_label)
 
@@ -639,7 +672,7 @@ class MainWindow(QtWidgets.QMainWindow):
         central = QtWidgets.QWidget()
         self.setCentralWidget(central)
         h = QtWidgets.QHBoxLayout(central)
-        self.splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
+        self.splitter = QtWidgets.QSplitter(self._split_orientation)
         self.splitter.setChildrenCollapsible(False)
         self.splitter.setHandleWidth(8)
 
@@ -662,8 +695,8 @@ class MainWindow(QtWidgets.QMainWindow):
         filter_layout.addWidget(self.status_filter)
         lv.addLayout(filter_layout)
 
-        self.table = QtWidgets.QTableWidget(0, 9)
-        self.table.setHorizontalHeaderLabels(['ID', 'Page', 'Method', 'User', 'Result', 'Nominal', 'LSL', 'USL', 'Status'])
+        self.table = QtWidgets.QTableWidget(0, 10)
+        self.table.setHorizontalHeaderLabels(['ID', 'Page', 'Method', 'User', 'Result', 'Nominal', 'LSL', 'USL', 'Notes', 'Status'])
         self.table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.SingleSelection)
         self.table.cellChanged.connect(self.table_cell_changed)
@@ -676,10 +709,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.pdf_view = PDFView(self)
         self.pdf_view.rectPicked.connect(self._rect_picked)
         self.pdf_view.balloonClicked.connect(self._balloon_clicked)
-        self.splitter.addWidget(left)
-        self.splitter.addWidget(self.pdf_view)
-        self.splitter.setStretchFactor(0, 1)
-        self.splitter.setStretchFactor(1, 3)
+        self._table_panel = left
+        self._apply_layout_preference()
         h.addWidget(self.splitter)
 
         self._update_balloon_size_controls_enabled()
@@ -694,6 +725,14 @@ class MainWindow(QtWidgets.QMainWindow):
         except Exception:
             return []
         items = []
+        layout_value = None
+        if isinstance(data, dict):
+            layout_value = data.get('layout')
+            data = data.get('recent', [])
+        if isinstance(layout_value, str):
+            lowered = layout_value.lower()
+            if lowered in (LAYOUT_HORIZONTAL, LAYOUT_VERTICAL):
+                self._layout_pref = lowered
         if isinstance(data, list):
             for entry in data:
                 if isinstance(entry, str) and entry:
@@ -706,9 +745,54 @@ class MainWindow(QtWidgets.QMainWindow):
         try:
             RECENT_STORE_PATH.parent.mkdir(parents=True, exist_ok=True)
             with RECENT_STORE_PATH.open('w', encoding='utf-8') as handle:
-                json.dump(self._recent_files[:RECENT_FILE_LIMIT], handle)
+                payload = {
+                    'recent': self._recent_files[:RECENT_FILE_LIMIT],
+                    'layout': self._layout_pref,
+                }
+                json.dump(payload, handle)
         except Exception:
             pass
+
+    def _apply_layout_preference(self) -> None:
+        splitter = getattr(self, 'splitter', None)
+        if splitter is None:
+            return
+        orientation = QtCore.Qt.Orientation.Vertical if self._layout_pref == LAYOUT_VERTICAL else QtCore.Qt.Orientation.Horizontal
+        self._split_orientation = orientation
+        # Remove existing widgets without deleting them
+        while splitter.count():
+            child = splitter.widget(0)
+            if child is None:
+                break
+            child.setParent(None)
+        if orientation == QtCore.Qt.Orientation.Horizontal:
+            order = (self._table_panel, self.pdf_view)
+        else:
+            order = (self.pdf_view, self._table_panel)
+        for widget in order:
+            if widget is not None:
+                splitter.addWidget(widget)
+        splitter.setOrientation(orientation)
+        self._update_splitter_stretch()
+
+    def _update_splitter_stretch(self) -> None:
+        splitter = getattr(self, 'splitter', None)
+        if splitter is None:
+            return
+        if self._split_orientation == QtCore.Qt.Orientation.Horizontal:
+            splitter.setStretchFactor(0, 1)
+            splitter.setStretchFactor(1, 3)
+        else:
+            splitter.setStretchFactor(0, 3)
+            splitter.setStretchFactor(1, 2)
+
+    def _layout_toggle_toggled(self, checked: bool) -> None:
+        new_pref = LAYOUT_VERTICAL if checked else LAYOUT_HORIZONTAL
+        if new_pref == self._layout_pref:
+            return
+        self._layout_pref = new_pref
+        self._apply_layout_preference()
+        self._write_recent_files()
 
     def _populate_recent_menu(self) -> None:
         menu = self._recent_menu
@@ -767,7 +851,9 @@ class MainWindow(QtWidgets.QMainWindow):
         except RuntimeError:
             return
         table.setRowCount(0)
-        wo_results = read_wo(self.pdf_path, self.current_wo) if self.current_wo else {}
+        use_inspection_notes = self.mode == 'Inspection' and bool(self.current_wo)
+        wo_results = read_wo(self.pdf_path, self.current_wo) if use_inspection_notes else {}
+        wo_notes = read_wo_notes(self.pdf_path, self.current_wo) if use_inspection_notes else {}
         for r in self.rows:
             id_ = r.get('id', '')
             page = str(r.get('page', ''))
@@ -782,6 +868,10 @@ class MainWindow(QtWidgets.QMainWindow):
                 result = ''
             else:
                 result = wo_results.get(id_, '')
+            if use_inspection_notes:
+                note = wo_notes.get(id_, '')
+            else:
+                note = ''
             # determine status
             try:
                 if result.upper() == 'PASS':
@@ -848,6 +938,12 @@ class MainWindow(QtWidgets.QMainWindow):
             table.setItem(row, self.COL_NOMINAL, make_item(nom, can_edit_specs))
             table.setItem(row, self.COL_LSL, make_item(lsl, can_edit_specs))
             table.setItem(row, self.COL_USL, make_item(usl, can_edit_specs))
+            note_item = QtWidgets.QTableWidgetItem(note)
+            if use_inspection_notes:
+                note_item.setFlags(note_item.flags() | QtCore.Qt.ItemFlag.ItemIsEditable)
+            else:
+                note_item.setFlags(note_item.flags() & ~QtCore.Qt.ItemFlag.ItemIsEditable)
+            table.setItem(row, self.COL_NOTES, note_item)
             table.setItem(row, self.COL_STATUS, make_item(status, False))
             self._apply_status_formatting(row, status)
 
@@ -922,9 +1018,7 @@ class MainWindow(QtWidgets.QMainWindow):
                         break
             else:
                 # Inspection: write result and recompute status for this row
-                wo_results = read_wo(self.pdf_path, self.current_wo)
-                wo_results[fid] = val
-                write_wo(self.pdf_path, self.current_wo, wo_results)
+                upsert_result_entry(self.pdf_path, self.current_wo, fid, result=val)
                 inspector = (current_username() or '').strip()
                 if inspector and self.pdf_path:
                     update_feature(self.pdf_path, fid, {'username': inspector})
@@ -949,6 +1043,19 @@ class MainWindow(QtWidgets.QMainWindow):
                         self.table.blockSignals(False)
                 self._recompute_row_status(row)
             self._advance_result_edit(row)
+            return
+        if col == self.COL_NOTES:
+            note_item = self.table.item(row, col)
+            note_value = note_item.text() if note_item else ''
+            if self.mode != 'Inspection' or not self.current_wo:
+                try:
+                    self.table.blockSignals(True)
+                    if note_item:
+                        note_item.setText('')
+                finally:
+                    self.table.blockSignals(False)
+                return
+            upsert_result_entry(self.pdf_path, self.current_wo, fid, notes=note_value)
             return
         if self.mode == 'Ballooning' and col == self.COL_NOMINAL:
             text_item = self.table.item(row, col)
@@ -2195,6 +2302,7 @@ class MainWindow(QtWidgets.QMainWindow):
         export_rows = []
         for workorder in workorders:
             results = read_wo(self.pdf_path, workorder) or {}
+            notes_map = read_wo_notes(self.pdf_path, workorder)
             # Emit a row for every feature so missing measurements appear in the export.
             for feature in features:
                 fid = feature.get('id')
@@ -2205,6 +2313,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 has_result = bool(normalized.strip())
                 display_value = normalized if has_result else 'N/A'
                 creator = (feature.get('username') or '')
+                notes_value = notes_map.get(fid, '')
                 status = self._status_from_fields(
                     normalized.strip() if has_result else '',
                     (feature.get('lsl') or '').strip(),
@@ -2219,10 +2328,11 @@ class MainWindow(QtWidgets.QMainWindow):
                     (feature.get('nominal') or ''),
                     (feature.get('lsl') or ''),
                     (feature.get('usl') or ''),
+                    notes_value,
                     display_value,
                     status,
                 ])
-        headers = ['Work Order', 'Feature ID', 'Page', 'Method', 'User', 'Nominal', 'LSL', 'USL', 'Result', 'Status']
+        headers = ['Work Order', 'Feature ID', 'Page', 'Method', 'User', 'Nominal', 'LSL', 'USL', 'Notes', 'Result', 'Status']
         base = Path(self.pdf_path).stem
         default_name = f'{base}_all_results.csv'
         default_dir = Path(self.pdf_path).parent if self.pdf_path else Path.home()
@@ -2329,6 +2439,7 @@ class MainWindow(QtWidgets.QMainWindow):
             ('Nominal', 80, 2),
             ('LSL', 80, 2),
             ('USL', 80, 2),
+            ('Notes', 120, 0),
             ('Status', 65, 1),
         ]
         def draw_header(page, y):

@@ -5,7 +5,7 @@ import re
 import sqlite3
 from contextlib import closing
 from datetime import datetime
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
 
 MASTER_HEADER = ["id", "page", "x", "y", "w", "h", "zoom", "method", "nominal", "lsl", "usl", "bx", "by", "br", "username"]
 DB_SUFFIX = ".axis.db"
@@ -26,6 +26,7 @@ def ensure_master(pdf_path: str) -> str:
         if init_needed:
             _initialize_db(conn)
         _ensure_feature_schema(conn)
+        _ensure_results_schema(conn)
         _maybe_migrate_from_csv(pdf_path, conn)
     finally:
         conn.close()
@@ -60,6 +61,7 @@ def _initialize_db(conn: sqlite3.Connection):
             feature_id TEXT NOT NULL,
             workorder TEXT NOT NULL,
             result TEXT,
+            notes TEXT,
             updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (feature_id, workorder),
             FOREIGN KEY (feature_id) REFERENCES features(id) ON DELETE CASCADE
@@ -83,6 +85,14 @@ def _ensure_feature_schema(conn: sqlite3.Connection):
     columns = {row[1] for row in cursor.fetchall()}
     if "username" not in columns:
         conn.execute("ALTER TABLE features ADD COLUMN username TEXT")
+        conn.commit()
+
+
+def _ensure_results_schema(conn: sqlite3.Connection):
+    cursor = conn.execute("PRAGMA table_info(results)")
+    columns = {row[1] for row in cursor.fetchall()}
+    if "notes" not in columns:
+        conn.execute("ALTER TABLE results ADD COLUMN notes TEXT")
         conn.commit()
 
 
@@ -199,6 +209,7 @@ def add_feature(pdf_path: str, feature: Dict[str, str]) -> Dict[str, str]:
         payload.setdefault("bx", "0")
         payload.setdefault("by", "0")
         payload.setdefault("br", "14")
+        payload.setdefault("notes", "")
         conn.execute(
             f"INSERT INTO features ({', '.join(MASTER_HEADER)}) VALUES ({', '.join('?' for _ in MASTER_HEADER)})",
             [payload.get(col, "") for col in MASTER_HEADER]
@@ -261,9 +272,21 @@ def read_wo(pdf_path: str, workorder: str) -> Dict[str, str]:
         return {row[0]: (row[1] or "") for row in cur.fetchall()}
 
 
-def write_wo(pdf_path: str, workorder: str, data: Dict[str, str]):
+def read_wo_notes(pdf_path: str, workorder: str) -> Dict[str, str]:
+    if not workorder:
+        return {}
+    with closing(_connect(pdf_path)) as conn:
+        cur = conn.execute(
+            "SELECT feature_id, notes FROM results WHERE workorder = ?",
+            (workorder,)
+        )
+        return {row[0]: (row[1] or "") for row in cur.fetchall()}
+
+
+def write_wo(pdf_path: str, workorder: str, data: Dict[str, str], notes: Optional[Dict[str, str]] = None):
     if not workorder:
         return
+    incoming_notes = notes if notes is not None else read_wo_notes(pdf_path, workorder)
     timestamp = datetime.utcnow().isoformat()
     with closing(_connect(pdf_path)) as conn:
         conn.execute("BEGIN")
@@ -271,9 +294,45 @@ def write_wo(pdf_path: str, workorder: str, data: Dict[str, str]):
         for feature_id, result in data.items():
             if not feature_id:
                 continue
+            note_value = incoming_notes.get(feature_id, "")
             conn.execute(
-                "INSERT INTO results (feature_id, workorder, result, updated_at) VALUES (?, ?, ?, ?)",
-                (feature_id, workorder, result, timestamp)
+                "INSERT INTO results (feature_id, workorder, result, notes, updated_at) VALUES (?, ?, ?, ?, ?)",
+                (feature_id, workorder, result, note_value, timestamp)
+            )
+        conn.commit()
+
+
+def upsert_result_entry(pdf_path: str, workorder: str, feature_id: str, *, result: Optional[str] = None, notes: Optional[str] = None):
+    if not workorder or not feature_id:
+        return
+    timestamp = datetime.utcnow().isoformat()
+    with closing(_connect(pdf_path)) as conn:
+        row = conn.execute(
+            "SELECT 1 FROM results WHERE feature_id = ? AND workorder = ?",
+            (feature_id, workorder)
+        ).fetchone()
+        if row:
+            assignments = []
+            values: list[str] = []
+            if result is not None:
+                assignments.append("result = ?")
+                values.append(result)
+            if notes is not None:
+                assignments.append("notes = ?")
+                values.append(notes)
+            if not assignments:
+                return
+            assignments.append("updated_at = ?")
+            values.append(timestamp)
+            values.extend([feature_id, workorder])
+            conn.execute(
+                f"UPDATE results SET {', '.join(assignments)} WHERE feature_id = ? AND workorder = ?",
+                values
+            )
+        else:
+            conn.execute(
+                "INSERT INTO results (feature_id, workorder, result, notes, updated_at) VALUES (?, ?, ?, ?, ?)",
+                (feature_id, workorder, result or '', notes or '', timestamp)
             )
         conn.commit()
 
